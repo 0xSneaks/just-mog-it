@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+
+# Environment & local config — never commit secrets
+.env
+.env.*
+!.env.example
+config.toml
+*.local.*
+
+# Keys, keypairs, secrets, cookies — hard exclusions
+*keypair*
+*secret*
+*cookie*
+cookies.txt
+*.pem
+*.key
+*.p12
+*.keystore
+id_rsa*
+id_ed25519*
+.vault/
+
+# Budget ledger & runtime state (operator-local, never published)
+ledger.json
+budget-ledger.json
+*.ledger
+state.json
+dead_letter/
+
+# Logs & caches
+*.log
+__pycache__/
+*.pyc
+.cache/
+tmp/
+temp/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
