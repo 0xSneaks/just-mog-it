@@ -5,11 +5,21 @@
     "name": "Doland Tremp",
     "ticker": "TREMP",
     "description": "Doland Tremp is a coin launched through MogIt. Launched by muse.",
-    "image": "none — source screenshot is a FOMO position screen (app UI + another user's handle), not usable as token art per the media rule"
+    "image": "none \u2014 source screenshot is a FOMO position screen (app UI + another user's handle), not usable as token art per the media rule"
   },
   "venue": "Mogz.fun",
-  "status": "STAGED — BLOCKED: Mogz wallet underfunded (0.0021 SOL; needs ~0.02-0.05 SOL)",
-  "budget": {"lifetime_cap_usd": 30, "spent_usd": 15.91, "remaining_usd": 14.09},
-  "collision_check": "UNVERIFIED — existing TREMP on Mogz not checked yet",
-  "confirm_verb": "LAUNCH TREMP"
+  "status": "launched",
+  "budget": {
+    "lifetime_cap_usd": 30,
+    "spent_usd": 15.91,
+    "remaining_usd": 14.09
+  },
+  "collision_check": "UNVERIFIED \u2014 existing TREMP on Mogz not checked yet",
+  "confirm_verb": "LAUNCH TREMP",
+  "mint": "EarneMetyCsEqac2EEiLUh3VdR6bMre6cqM9rftNc6jB",
+  "tx": "3SDpPWofQUkbDhhQyRRRZgNDUZYFAQeKg2CSsa2UCfzkrHXHvh7BsQNWTAGkpV7QkYakuzFvyqXgdA797teaVfQg",
+  "cost_sol": 0.02059164,
+  "cost_usd": 1.9331,
+  "launched_at": "2026-11-01 ~20:00 ET",
+  "coin_page": "https://mogz.fun/coin/EarneMetyCsEqac2EEiLUh3VdR6bMre6cqM9rftNc6jB"
 }
