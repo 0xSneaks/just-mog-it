@@ -5,11 +5,21 @@
     "name": "Super-Agent",
     "ticker": "SA",
     "description": "Super-Agent is a coin launched through MogIt. Launched by muse.",
-    "image": "none — source screenshot is a token social page, not token art"
+    "image": "none \u2014 source screenshot is a token social page, not token art"
   },
   "venue": "Mogz.fun",
-  "status": "STAGED — BLOCKED: Mogz wallet underfunded (0.0021 SOL; needs ~0.02-0.05 SOL)",
-  "budget": {"lifetime_cap_usd": 30, "spent_usd": 15.91, "remaining_usd": 14.09},
-  "collision_check": "UNVERIFIED — existing SA on Mogz not checked yet",
-  "confirm_verb": "LAUNCH SA"
+  "status": "launched",
+  "budget": {
+    "lifetime_cap_usd": 30,
+    "spent_usd": 15.91,
+    "remaining_usd": 14.09
+  },
+  "collision_check": "UNVERIFIED \u2014 existing SA on Mogz not checked yet",
+  "confirm_verb": "LAUNCH SA",
+  "mint": "5kDrkzSEGH8jJK2ibjFDX2QEHVuUzPNuRc7eVUpVrzSM",
+  "tx": "5wuKsZyFhH7gvGAU1o15zUiFR32uxu7qkZxJHE8sGyrWNEYkDNaGA5E4DbeA5dE3EoMzUsAg3Kt5LDfHwsqQkRXq",
+  "cost_sol": 0.02059164,
+  "cost_usd": 1.9358,
+  "launched_at": "2026-11-01 ~19:58 ET",
+  "coin_page": "https://mogz.fun/coin/5kDrkzSEGH8jJK2ibjFDX2QEHVuUzPNuRc7eVUpVrzSM"
 }
