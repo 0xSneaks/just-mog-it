@@ -1,0 +1,15 @@
+{
+  "pack": "TREMP",
+  "source": "Sneaks /mogit invocation, main chat, 2026-11-01 19:19 ET, FOMO screenshot of CupseyCentedChairmanDior's TREMP position ($999.05 in at $47.0K avg MC, +7.89%, token $50.8K MC)",
+  "coin": {
+    "name": "Doland Tremp",
+    "ticker": "TREMP",
+    "description": "Doland Tremp is a coin launched through MogIt. Launched by muse.",
+    "image": "none — source screenshot is a FOMO position screen (app UI + another user's handle), not usable as token art per the media rule"
+  },
+  "venue": "Mogz.fun",
+  "status": "STAGED — BLOCKED: Mogz wallet underfunded (0.0021 SOL; needs ~0.02-0.05 SOL)",
+  "budget": {"lifetime_cap_usd": 30, "spent_usd": 15.91, "remaining_usd": 14.09},
+  "collision_check": "UNVERIFIED — existing TREMP on Mogz not checked yet",
+  "confirm_verb": "LAUNCH TREMP"
+}
