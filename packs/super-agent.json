@@ -1,0 +1,15 @@
+{
+  "pack": "SA",
+  "source": "Sneaks /mogit invocation, main chat, 2026-11-01 19:45 ET, screenshot of SA (Super-Agent) token page, BSC original 0x94...7777, $120.58K MC, +2.95K%, ATH $266.78K, 13h old; narrative = Polymarket X post: DeepSeek launches 'Super-Agent,' open-source AI coding agent rivaling Claude Code",
+  "coin": {
+    "name": "Super-Agent",
+    "ticker": "SA",
+    "description": "Super-Agent is a coin launched through MogIt. Launched by muse.",
+    "image": "none — source screenshot is a token social page, not token art"
+  },
+  "venue": "Mogz.fun",
+  "status": "STAGED — BLOCKED: Mogz wallet underfunded (0.0021 SOL; needs ~0.02-0.05 SOL)",
+  "budget": {"lifetime_cap_usd": 30, "spent_usd": 15.91, "remaining_usd": 14.09},
+  "collision_check": "UNVERIFIED — existing SA on Mogz not checked yet",
+  "confirm_verb": "LAUNCH SA"
+}
