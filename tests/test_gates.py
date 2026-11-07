@@ -66,8 +66,9 @@ class T(unittest.TestCase):
         s.assertIn("underfunded", sess.handle("/mogit"))
     def test_ledger_only_after_success(s):
         L = ledger(); m = M(ok=False); sess = Session("grok-bot", L, m, Chain(), Vault(), Img())
-        out = run(sess, *HAPPY, "LAUNCH"); s.assertIn("no budget spent", out)
-        s.assertEqual(str(L.load()["spent_usd"]), "15.91")
+        out = run(sess, *HAPPY, "LAUNCH"); s.assertIn("unconfirmed", out)  # C2: ok:false holds the reservation, never releases it
+        s.assertEqual(str(L.load()["spent_usd"]), "15.91")  # no spend recorded without a confirmed send
+        s.assertEqual(L.load()["launches"], [])
     def test_happy_path_commits(s):
         L = ledger(); m = M(); sess = Session("grok-bot", L, m, Chain(), Vault(), Img())
         card = run(sess, *HAPPY); s.assertIn("terms_hash", card); s.assertTrue(m.simulated)
