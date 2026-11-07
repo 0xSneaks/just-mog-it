@@ -40,6 +40,7 @@ class Session:
 
     def _preflight(self):
         q = self.mogz.quote()
+        gates.check_quote(q)  # validate the SOL amount before parsing or comparing it
         bal = Decimal(str(self.chain.balance_sol()))
         if bal < Decimal(str(q["sol"])): raise LedgerError(f"wallet underfunded: need {q['sol']}, have {bal}")
         st = self.ledger.check(q["usd"])
@@ -100,6 +101,8 @@ class Session:
     def _render(self):
         try: q, bal, st = self._preflight()
         except LedgerError as e: return self._refuse(e)
+        try: quote_lamports = gates.check_quote(q)
+        except LedgerError as e: return self._refuse(e)
         c = self.coin
         tx = self.mogz.build(c, q)                 # server builds the single-ix create
         try: g = inspect(tx, q.get("mint"))       # Gate 3 before anything else
@@ -108,11 +111,8 @@ class Session:
         if sim.get("err"): return self._refuse(f"simulation failed: {sim['err']}")
         delta = sim.get("payer_lamports_delta")
         if delta is None: return self._refuse("simulation missing payer_lamports_delta")  # HOLE-1: refuse, never KeyError
-        spend = -int(delta)                        # lamports the payer actually loses in simulation
-        if spend < 0: return self._refuse("simulation delta positive: payer would gain lamports")
-        try: gates.check_spend(spend)              # 0.025 SOL hard cap on the simulated spend
+        try: spend = gates.payer_spend(delta)      # validate whole lamports before conversion/cap check
         except LedgerError as e: return self._refuse(e)
-        quote_lamports = int(Decimal(str(q["sol"])) * 1_000_000_000)
         if spend > quote_lamports + FEE_TOLERANCE_LAMPORTS:  # FIX 2: simulated spend checked against the quote
             return self._refuse(f"simulated cost {spend} lamports exceeds quote {quote_lamports} + fee tolerance")
         actual_usd = (Decimal(spend) * Decimal(str(q["usd"])) / Decimal(quote_lamports)
@@ -142,9 +142,10 @@ class Session:
         with self.ledger.locked():  # FIX 4: check -> reserve -> submit -> settle, one session at a time
             try:
                 self._preflight(); inspect(self.tx, self.card["mint"])  # gates re-run under the lock, before sign
-                gates.check_spend(-int(self.card["sim.lamports_delta"]))
+                gates.payer_spend(self.card["sim.lamports_delta"])
+                cost = self.card["cost.usd"]
+                self.ledger.check(cost)  # pinned quote + simulated fee cost must fit before signing
             except (LedgerError, GuardError) as e: return self._refuse(e)
-            cost = self.card["cost.usd"]
             try: signed = self.vault.sign(self.tx, th)
             except Exception as e:  # nothing signed, nothing sent: no reservation needed, no budget spent
                 return self._refuse(f"sign error: {e}; nothing submitted, no budget spent")

@@ -224,12 +224,70 @@ def test_approval_requires_a_name():
 
 
 def test_autopost_needs_flag_and_kill_off():
-    for flag, kill, posts in [(True, True, 0), (False, False, 0), ("true", False, 0), (True, False, 1)]:
+    for flag, kill in [(True, True), (False, False), ("true", False), (True, False)]:
         x = X()
         over = {"mog_me": {**load().raw["mog_me"], "autopost": flag}}
         f, _ = flow(x=x, kill=kill, policy_over=over)
         f.handle(mention(1))
-        assert len(f.post_ready()) == posts, (flag, kill)
+        assert f.post_ready() == [], (flag, kill)
+        assert f.get("1")["status"] == mq.PENDING
+        assert x.replies == [] and x.media == []
+
+
+@pytest.mark.parametrize("approver", [None, "random"])
+def test_approved_item_requires_stored_named_approver(approver):
+    x = X(); f, _ = flow(x=x, kill=False)
+    f.handle(mention(1))
+    item = f.get("1")
+    item.update(status=mq.APPROVED, approved_by=approver)
+    f._write(item)
+    assert f.post_ready() == []
+    assert f.get("1")["status"] == mq.APPROVED
+    assert x.replies == [] and x.media == []
+
+
+def test_kill_switch_stopping_during_upload_blocks_reply():
+    x = X(); f, store = flow(x=x, kill=False)
+    f.handle(mention(1)); f.approve("1", "sneaks", "good fit")
+    upload = x.upload_media
+
+    def stop_after_upload(data, alt_text=None):
+        media_id = upload(data, alt_text=alt_text)
+        store.put("kill", True)
+        return media_id
+
+    x.upload_media = stop_after_upload
+    assert f.post_ready() == []
+    assert len(x.media) == 1 and x.replies == []
+    assert f.get("1")["status"] == mq.APPROVED
+
+
+def test_kill_switch_stopping_between_items_blocks_next_dispatch():
+    x = X(); f, store = flow(x=x, kill=False)
+    for i in (1, 2):
+        f.handle(mention(i, author=str(110 + i)))
+        f.approve(str(i), "Muse", "good fit")
+    reply = x.reply
+
+    def stop_after_first_reply(tweet_id, text, media_ids=None, idempotency_key=None):
+        result = reply(tweet_id, text, media_ids=media_ids, idempotency_key=idempotency_key)
+        store.put("kill", True)
+        return result
+
+    x.reply = stop_after_first_reply
+    assert f.post_ready() == [("1", "r1")]
+    assert len(x.media) == 1 and len(x.replies) == 1
+    assert f.get("1")["status"] == mq.POSTED
+    assert f.get("2")["status"] == mq.APPROVED
+
+
+def test_ambiguous_reply_keeps_posting_hold():
+    x = X(); f, _ = flow(x=x, kill=False)
+    f.handle(mention(1)); f.approve("1", "sneaks", "good fit")
+    x.reply = lambda *a, **k: (_ for _ in ()).throw(TimeoutError("outcome unknown"))
+    with pytest.raises(TimeoutError):
+        f.post_ready()
+    assert f.get("1")["status"] == mq.POSTING
 
 
 def test_policy_defaults_autopost_off():

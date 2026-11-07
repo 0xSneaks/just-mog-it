@@ -105,6 +105,16 @@ class Gates(unittest.TestCase):
         out = run(sess(ledger()[0], m), *HAPPY)
         s.assertIn("0.025 SOL", out); s.assertEqual(m.sent, [])
 
+    def test_fractional_over_cap_simulation_delta_is_not_truncated(s):
+        m = M(sim={"payer_lamports_delta": -25_000_000.1}, sol="0.025")
+        out = run(sess(ledger()[0], m), *HAPPY)
+        s.assertIn("whole number of lamports", out); s.assertEqual(m.sent, [])
+
+    def test_malformed_simulation_delta_refused_before_confirm(s):
+        m = M(sim={"payer_lamports_delta": "not-lamports"})
+        out = run(sess(ledger()[0], m), *HAPPY)
+        s.assertIn("simulation delta is invalid", out); s.assertEqual(m.sent, [])
+
     def test_simulated_spend_at_cap_allowed(s):
         m = M(sim={"payer_lamports_delta": -25_000_000}, sol="0.025")
         s.assertIn("CONFIRM CARD", run(sess(ledger()[0], m), *HAPPY))
@@ -112,6 +122,18 @@ class Gates(unittest.TestCase):
     def test_quote_over_cap_refused_before_build(s):
         m = M(sol="0.0251")
         s.assertIn("0.025 SOL", sess(ledger()[0], m).handle("/mogit"))
+
+    def test_negative_quote_refused_before_build(s):
+        m = M(sol="-0.001")
+        out = sess(ledger()[0], m).handle("/mogit")
+        s.assertIn("REFUSED", out); s.assertIn("non-negative", out)
+        s.assertFalse(hasattr(m, "simulated")); s.assertEqual(m.sent, [])
+
+    def test_malformed_quote_refused_before_build(s):
+        m = M(sol="not-a-number")
+        out = sess(ledger()[0], m).handle("/mogit")
+        s.assertIn("REFUSED", out); s.assertIn("invalid", out)
+        s.assertFalse(hasattr(m, "simulated")); s.assertEqual(m.sent, [])
 
     # ---- SOL-only quote, first buy 0
     def test_non_sol_quote_refused(s):
@@ -129,6 +151,21 @@ class Gates(unittest.TestCase):
             s.assertIn("first buy", sess(ledger()[0], m).handle("/mogit"), bad)
         m = M(); del m.q["first_buy_lamports"]
         s.assertIn("first buy", sess(ledger()[0], m).handle("/mogit"))
+
+    def test_full_pinned_card_cost_checked_before_sign(s):
+        # Quote is $1.93 and fits the $1.932 remaining balance. Simulated fees
+        # raise the pinned card cost slightly above that remainder.
+        L, _ = ledger(kill=False, extra={"spent_usd": "28.068"})
+        m = M(sim={"payer_lamports_delta": -20_641_640})
+        se = sess(L, m); signed = []
+        se.vault.sign = lambda tx, th: signed.append(tx) or "SIGNED"
+        card = run(se, *HAPPY)
+        s.assertIn("CONFIRM CARD", card)
+        s.assertIn("cost.quoted_usd: 1.93", card)
+        s.assertIn("budget.remaining_usd: -0.002", card)
+        out = se.handle("LAUNCH")
+        s.assertIn("REFUSED", out); s.assertIn("budget cap hit", out)
+        s.assertEqual(signed, []); s.assertEqual(m.sent, [])
 
     def test_quote_gates_rechecked_before_sign(s):
         L, _ = ledger(); m = M(); se = sess(L, m)

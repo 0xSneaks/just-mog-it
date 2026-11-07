@@ -3,7 +3,7 @@ Checked in flow._preflight (before build AND again under the ledger lock before 
 the simulated spend in flow._render / flow._confirm.
 A gate failure raises GateError (a LedgerError), which the flow turns into REFUSED."""
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from .ledger import LedgerError
 
@@ -38,19 +38,49 @@ def launches_today(state, now):
 
 
 def check_quote(q):
+    if not isinstance(q, dict):
+        raise GateError("quote must be an object")
     if q.get("quote_mint") != SOL_MINT:
         raise GateError("SOL pairs only: quote mint is not wrapped SOL")
     fb = q.get("first_buy_lamports")
     if type(fb) is not int or fb != 0:
         raise GateError("first buy must be exactly 0 (no dev buy)")
-    sol = Decimal(str(q["sol"]))
-    if not sol.is_finite() or sol * 1_000_000_000 > PER_LAUNCH_CAP_LAMPORTS:
+    try:
+        sol = Decimal(str(q["sol"]))
+    except (KeyError, TypeError, ValueError, InvalidOperation):
+        raise GateError("quote SOL amount is invalid") from None
+    lamports = sol * Decimal(1_000_000_000)
+    if not sol.is_finite() or sol < 0 or lamports != lamports.to_integral_value():
+        raise GateError("quote SOL amount must be non-negative whole lamports")
+    if lamports > PER_LAUNCH_CAP_LAMPORTS:
         raise GateError(f"quote {sol} SOL exceeds the 0.025 SOL per-launch cap")
+    return int(lamports)
 
 
 def check_spend(spend_lamports):
-    if int(spend_lamports) > PER_LAUNCH_CAP_LAMPORTS:
+    try:
+        spend = Decimal(str(spend_lamports))
+    except (TypeError, ValueError, InvalidOperation):
+        raise GateError("simulated spend is invalid") from None
+    if (not spend.is_finite() or spend < 0 or
+            spend != spend.to_integral_value()):
+        raise GateError("simulated spend must be non-negative whole lamports")
+    if spend > PER_LAUNCH_CAP_LAMPORTS:
         raise GateError(f"simulated spend {spend_lamports} lamports exceeds the 0.025 SOL per-launch cap")
+    return int(spend)
+
+
+def payer_spend(delta):
+    """Validate the simulated payer delta before converting it to an integer spend."""
+    try:
+        value = Decimal(str(delta))
+    except (TypeError, ValueError, InvalidOperation):
+        raise GateError("simulation delta is invalid") from None
+    if not value.is_finite() or value != value.to_integral_value():
+        raise GateError("simulation delta must be a whole number of lamports")
+    if value > 0:
+        raise GateError("simulation delta positive: payer would gain lamports")
+    return check_spend(-value)
 
 
 def check_preflight(ledger, state, q, now):

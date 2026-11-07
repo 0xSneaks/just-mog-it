@@ -1,6 +1,6 @@
 """'mog me' on X: the mention author's own PFP, remade with shield shades, via an owner
-approval queue. Nothing posts unless the owner approved the item (or autopost is True AND
-the kill switch is OFF; both are off by default).
+approval queue. Nothing posts unless the item is APPROVED by Sneaks or Muse and the kill
+switch is explicitly OFF. Autopost never bypasses approval.
 
 Pipeline (per mention): skip retweets / own posts / duplicates → eligibility (>= 60 followers AND a
 checkmark AND follows @justmogit_bot; silent skip otherwise) → 1 per author per rolling 24h
@@ -752,16 +752,14 @@ class MogMeFlow:
 
     # -------------------------------------------------- posting (gated)
     def post_ready(self):
-        """Post APPROVED items (or PENDING ones when autopost is exactly True). Never while the
-        kill switch is ON. An item is marked POSTING before any X call, so a crash mid-post
-        can never double-post; POSTING items need a manual look."""
-        if self.killed():
-            return []
-        autopost = self.p.raw.get("mog_me", {}).get("autopost") is True
+        """Dispatch explicitly approved items with a named approver, checking kill before each
+        external call. POSTING items need a manual look if a reply's outcome is ambiguous."""
         done = []
         for it in self.items():
-            if not (it["status"] == APPROVED or (autopost and it["status"] == PENDING)):
+            if it.get("status") != APPROVED or str(it.get("approved_by") or "").strip().lower() not in {"sneaks", "muse"}:
                 continue
+            if self.killed():
+                break
             if it.get("image_path") and it.get("editor") != "gemini":
                 it["status"], it["note"] = REJECTED, "stub/unknown editor image never posts"
                 self._write(it)
@@ -779,7 +777,15 @@ class MogMeFlow:
                     it["status"], it["note"] = REJECTED, "image changed after preview"
                     self._write(it)
                     continue
+                if self.killed():
+                    it["status"], it["note"] = APPROVED, "kill switch turned ON before media upload"
+                    self._write(it)
+                    break
                 media = [self.x.upload_media(data, alt_text=replies.alt_text(it["handle"]))]
+            if self.killed():
+                it["status"], it["note"] = APPROVED, "kill switch turned ON before reply"
+                self._write(it)
+                break
             rid = self.x.reply(it["reply_to"], it["reply_text"], media_ids=media,
                                idempotency_key=f"mogme:{it['mention_id']}")
             it.update(status=POSTED, reply_id=rid)
