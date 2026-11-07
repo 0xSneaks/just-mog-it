@@ -11,7 +11,18 @@ DeepSeek pair evaluator (`bot/live/deepseek.py`, `deepseek-flash`) is connected 
 **"mog me" on X** (`bot/mogme_queue.py`):
 - **Who gets mogged:** only the mention author, using their own PFP.
 - **Eligibility:** ≥ 60 followers, a checkmark, and following @justmogit_bot; otherwise a silent skip.
-- **Editor:** `IMAGE_EDITOR=stub` (the default; never postable) or `gemini` (needs `GEMINI_API_KEY`). The Gemini prompt is a verbatim copy of justmogit-site `api/mog.js` `vipers`: wraparound shield sport shades in the input's own art style, fitted to the face, colours from its palette. **Traits, NFT-style,** are drawn once per mog from `mog_me.traits` and saved with the item:
+- **Editor:** `IMAGE_EDITOR=stub` (the default; never postable) or `gemini` (needs `GEMINI_API_KEY`). The Gemini prompt is a verbatim copy of justmogit-site `api/mog.js` `vipers`: wraparound shield sport shades in the input's own art style, fitted to the face, colours from its palette. **Placement comes first** (`bot/mogme_pose.py`):
+1. Before the edit, one cheap gemini-2.5-flash call reads the head pose: front / three-quarter / profile (left or right), tilt in degrees, up/down, eye positions, art style, and whether the character already wears glasses.
+2. The prompt then gets pose-specific instructions:
+   - front: symmetric
+   - three-quarter: near lens bigger, far lens foreshortened behind the nose, only the near arm
+   - profile: one wraparound lens, arm straight back to the ear
+   - tilt: shades rotated by the same angle
+   - lens centres placed on the eye positions
+3. After each edit, a fit check asks whether the lenses sit over the eyes, follow the head angle, match the art style, and stay clear of the nose and mouth. A fail is a failed try (max 2 retries, then a polite text). If the check can't run, the item is queued with `fit_unchecked` for the owner.
+4. The stub reader (the default) makes no calls.
+
+**Traits, NFT-style,** are drawn once per mog from `mog_me.traits` and saved with the item:
 - frame lettering: PIT VIPER, or plain glasses
 - corner caption: GET MOGGED, MOGGED BY BRAINROT LABS, or none
 
@@ -19,7 +30,7 @@ Colour match: the picture's own palette (median-cut hex colours) goes into the p
 - **Before the edit:** avatars under 512 px are upscaled to 1024. Up to 3 owner-approved style references go along with each edit; `mogme-ref ID` adds one.
 - **No-change check:** if under 6% of pixels changed, the try counts as a fail. There are at most 2 retries, then a polite text draft. Every try is billed.
 - **Owner decisions:** approve and reject both need a short reason, which is saved with the item.
-- **Budget:** mog-me has its own $5.00/day, separate from the $0.30 launch-reply budget. That is 72 mogs/day if every one works on the first try, or 34 if every one needs all 3 tries.
+- **Budget:** mog-me has its own $5.00/day, separate from the $0.30 launch-reply budget. That is 68 mogs/day if every one works on the first try, or 32 if every one needs all 3 tries.
 - **Posting:** `mogme-post` posts only APPROVED gemini items, and only with the kill switch OFF. Autopost is off.
 
 **Monday switch to Gemini:**

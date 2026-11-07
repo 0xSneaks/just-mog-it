@@ -29,6 +29,7 @@ from urllib.parse import urlparse
 from PIL import Image, ImageDraw, ImageFont
 
 from . import replies
+from .mogme_pose import StubPoseReader, placement_prompt
 
 AVATAR_HOSTS = frozenset({"pbs.twimg.com"})
 FETCH_TIMEOUT_S = 10
@@ -76,12 +77,13 @@ def _usd(value, name):
 
 
 def cost_per_mog(policy):
-    """Worst-case USD per mog: Gemini image edit + one plain reply + reading the mention +
-    one user lookup. Any missing price raises (fail closed)."""
+    """USD per mog on a first-try success: Gemini image edit + one plain reply + reading the mention +
+    one user lookup + the pose read and one fit check. Any missing price raises (fail closed)."""
     try:
         c = policy.raw["mog_me"]["costs_usd"]
         parts = (_usd(c["gemini_image"], "gemini_image"), _usd(policy.raw["x_prices_usd"]["plain_post"], "plain_post"),
-                 _usd(c["mention_read"], "mention_read"), _usd(c["user_read"], "user_read"))
+                 _usd(c["mention_read"], "mention_read"), _usd(c["user_read"], "user_read"),
+                 _usd(c["pose_read"], "pose_read") * 2)              # pose read + one fit check
     except (KeyError, TypeError):
         raise MogMeConfigError("mog_me cost prices missing") from None
     return sum(parts, Decimal("0"))
@@ -103,8 +105,9 @@ def mogme_budget(policy):
 
 def worst_case_per_mog(policy):
     """Every try is billed: up to MAX_EDIT_TRIES Gemini calls per mog."""
-    g = _usd(policy.raw["mog_me"]["costs_usd"]["gemini_image"], "gemini_image")
-    return cost_per_mog(policy) + g * (MAX_EDIT_TRIES - 1)
+    c = policy.raw["mog_me"]["costs_usd"]
+    g, pr = _usd(c["gemini_image"], "gemini_image"), _usd(c["pose_read"], "pose_read")
+    return cost_per_mog(policy) + (g + pr) * (MAX_EDIT_TRIES - 1)
 
 
 def daily_cap(policy):
@@ -233,7 +236,8 @@ def compose_prompt(traits=None):
                                      "of the frames, and no other text anywhere on the frames or lenses.")
     else:
         base = VIPERS_PROMPT
-    return " ".join(x for x in (base, palette_prompt(traits.get("palette")), PLACEMENT_PROMPT) if x)
+    return " ".join(x for x in (base, traits.get("placement") or "", palette_prompt(traits.get("palette")),
+                                PLACEMENT_PROMPT) if x)
 
 
 def refs_prompt(traits=None):
@@ -504,8 +508,10 @@ def ineligible(m):
 
 # ------------------------------------------------------------------ the flow
 class MogMeFlow:
-    def __init__(self, store, policy, x, editor, queue_dir, fetch=httpx_get, clock=time.time, rng=None):
+    def __init__(self, store, policy, x, editor, queue_dir, fetch=httpx_get, clock=time.time, rng=None,
+                 pose_reader=None):
         self.s, self.p, self.x, self.editor, self.fetch, self.clock = store, policy, x, editor, fetch, clock
+        self.pose = pose_reader or StubPoseReader()
         self.dir = Path(queue_dir)
         self.dir.mkdir(parents=True, exist_ok=True)
         self.rng = rng or random.SystemRandom()
@@ -592,6 +598,15 @@ class MogMeFlow:
             traits["palette"] = palette_of(src)
         except Exception:
             traits["palette"] = []
+        pose_cost = _usd(self.p.raw["mog_me"]["costs_usd"]["pose_read"], "pose_read")
+        pose = None
+        if self._room(pose_cost, day):                    # placement first: read the head pose once
+            if self.pose.name != "stub":
+                self._book(pose_cost, day)
+            pose = self.pose.read_pose(src)
+        traits["pose"] = pose.asdict() if pose else None
+        traits["placement"] = placement_prompt(pose)
+        fit = []
         tries, fractions = 0, []
         while tries < MAX_EDIT_TRIES:
             if not self._room(gem, day):
@@ -609,16 +624,27 @@ class MogMeFlow:
             except Exception:
                 frac = 0.0
             fractions.append(round(frac, 4))
-            if frac >= self.min_changed:
-                self._save(mid, uid, handle, add_tag(edited, traits["caption"], traits["palette"]),
-                           replies.mog_me_done(handle),
-                           extra={"tries": tries, "changed": fractions, "traits": traits})
-                return ("mog_me_queued", mid)
-        self.s.ledger_row("mogme_no_change", {"mention_id": mid, "author_id": uid, "tries": tries,
-                                              "changed": fractions})
-        self._save(mid, uid, handle, None, POLITE_NO_CHANGE, note="no_change",
-                   extra={"tries": tries, "changed": fractions})
-        return ("mog_me_skipped", "no_change" if tries == MAX_EDIT_TRIES else "budget")
+            if frac < self.min_changed:
+                continue
+            verdict = None
+            if self._room(pose_cost, day):                # placement check on the result
+                if self.pose.name != "stub":
+                    self._book(pose_cost, day)
+                verdict = self.pose.check_fit(edited, pose)
+            fit.append(verdict)
+            if verdict is False:                          # wrong placement = a failed try
+                continue
+            saved = {k: v for k, v in traits.items() if k != "placement"}
+            self._save(mid, uid, handle, add_tag(edited, traits["caption"], traits["palette"]),
+                       replies.mog_me_done(handle), note=None if verdict else "fit_unchecked",
+                       extra={"tries": tries, "changed": fractions, "fit": fit, "traits": saved})
+            return ("mog_me_queued", mid)
+        why = "fit_failed" if False in fit else "no_change"
+        self.s.ledger_row(f"mogme_{why}", {"mention_id": mid, "author_id": uid, "tries": tries,
+                                           "changed": fractions, "fit": fit})
+        self._save(mid, uid, handle, None, POLITE_NO_CHANGE, note=why,
+                   extra={"tries": tries, "changed": fractions, "fit": fit})
+        return ("mog_me_skipped", why if tries == MAX_EDIT_TRIES else "budget")
 
     def _silent(self, mid, uid, reason):
         """Ineligible: no reply, no image, no edit. Logged only."""

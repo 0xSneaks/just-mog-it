@@ -150,14 +150,14 @@ def test_cooldown_one_per_user_per_rolling_24h():
 def test_cost_math_and_daily_cap():
     p = load()
     per = mq.cost_per_mog(p)
-    assert per == Decimal("0.039") + Decimal("0.015") + Decimal("0.005") + Decimal("0.010")  # 0.069
+    assert per == Decimal("0.039") + Decimal("0.015") + Decimal("0.005") + Decimal("0.010") + 2 * Decimal("0.002")  # 0.073
     assert mq.mogme_budget(p) == Decimal("5.00")                  # owner 2026-11-07, separate budget
-    assert mq.daily_cap(p) == 72                                  # floor(5.00 / 0.069), all first-try
-    assert mq.worst_case_per_mog(p) == Decimal("0.147")           # 3 Gemini tries + reply + 2 reads
-    assert int(Decimal("5.00") // mq.worst_case_per_mog(p)) == 34  # every mog needing all 3 tries
+    assert mq.daily_cap(p) == 68                                  # floor(5.00 / 0.073), all first-try
+    assert mq.worst_case_per_mog(p) == Decimal("0.155")           # 3 edits + 4 pose calls + reply + 2 reads
+    assert int(Decimal("5.00") // mq.worst_case_per_mog(p)) == 32  # every mog needing all 3 tries
 
 
-def small_budget(usd="0.276"):
+def small_budget(usd="0.292"):
     return {"mog_me": {**load().raw["mog_me"], "daily_budget_usd": usd}}
 
 
@@ -675,7 +675,8 @@ def test_traits_drawn_once_per_mog_recorded_and_sent_to_editor():
         tr = f.get("1")["traits"]
         assert (tr["frame_text"], tr["caption"]) == (frame, caption)
         assert len(tr["palette"]) >= 1 and all(c.startswith("#") and len(c) == 7 for c in tr["palette"])
-        assert ed.traits_seen[0] == ed.traits_seen[1] == tr
+        sent = [{k: v for k, v in t.items() if k != "placement"} for t in ed.traits_seen]
+        assert sent[0] == sent[1] == tr and tr["pose"] is None
         raw = Path(f.get("1")["image_path"]).read_bytes()
         assert (raw == png((512, 512), (250, 250, 250))) is (caption is None)
 

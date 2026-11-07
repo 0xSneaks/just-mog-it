@@ -42,6 +42,7 @@ mog_me:                             # "mog me" X flow (bot/mogme_queue.py): owne
     gemini_image: "0.039"           # UNVERIFIED: gemini-2.5-flash-image list price, 1290 output tokens x $30/1M
     mention_read: "0.005"           # UNVERIFIED: X pay-per-use post read (BUILD-SPEC-v2 §3)
     user_read: "0.010"              # UNVERIFIED: X pay-per-use user read (BUILD-SPEC-v2 §3)
+    pose_read: "0.002"              # UNVERIFIED: one gemini-2.5-flash vision call (pose read or fit check), conservative
 
 venue: pump.fun                     # owner 2026-11-04: pump.fun only
 

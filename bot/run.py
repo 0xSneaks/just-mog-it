@@ -76,8 +76,10 @@ class _Pair:
 def mogme_flow(store, p, x):
     """The "mog me" approval queue. IMAGE_EDITOR picks the editor (default stub); gemini without
     GEMINI_API_KEY raises MogMeConfigError, which refuses boot."""
+    from .mogme_pose import build_pose_reader
     from .mogme_queue import MogMeFlow, build_editor
-    return MogMeFlow(store, p, x, build_editor(), os.environ.get("JMI_MOGME_QUEUE", "mogme_queue"))
+    return MogMeFlow(store, p, x, build_editor(), os.environ.get("JMI_MOGME_QUEUE", "mogme_queue"),
+                     pose_reader=build_pose_reader())
 
 def loop(dry_run):
     store = Store(os.environ.get("JMI_DB", "justmogit.db"))
