@@ -117,7 +117,7 @@ class TestMetadata(unittest.TestCase):
 
     def test_prefix_and_truncation(self):
         d = metadata.build_description(self.p, "BINGUS", CA, "x" * 5000)
-        self.assertTrue(d.startswith(f"Rescue mog of $BINGUS — original CA {CA}. Not the original dev. NFA."))
+        self.assertTrue(d.startswith(f"$BINGUS was live on the wrong pair — not SOL. JustMogIt pulled the token's own picture and metadata and relaunched it paired with SOL. That's a mog. Original CA: {CA}."))
         self.assertLessEqual(len(d), self.p.description_max_chars)
 
     def test_strips_impersonation_words(self):
