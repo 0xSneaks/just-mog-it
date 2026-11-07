@@ -649,3 +649,11 @@ def test_tag_stays_in_bottom_corner_off_center():
         for x in range(0, 512, 8):
             assert img.getpixel((x, y)) == (0, 0, 0)
     assert mq.add_tag(png(), None) == png()
+
+
+def test_repo_style_refs_load_and_prompt_forbids_copying_text():
+    refs = mq.load_refs(str(Path(__file__).resolve().parents[1] / "mogme_refs"))
+    assert len(refs) == 2 and all(mq._sniff(r) == "image/jpeg" for r in refs)
+    t = mq.REFS_PROMPT
+    assert "Do NOT copy any text, letters, words, logos or brand names" in t
+    assert "never copy their faces" in t

@@ -186,9 +186,8 @@ VIPERS_PROMPT = (
     "palette. No text, letters, logos or brand names anywhere on the frames or "
     "lenses. Keep the face, identity, pose, clothing and background otherwise "
     "unchanged. Square 1:1 profile picture.")
-REFS_PROMPT = ("The images after this text are owner-approved examples of the target look. Match "
-               "how their shades are styled and fitted. Never copy their faces, people, text or "
-               "backgrounds into the result.")
+REFS_PROMPT = (  # verbatim in justmogit-site api/mog.js (REFS_PROMPT)
+    "The images after this text are owner-approved examples of the target look. Copy only how their shades are shaped, fitted to the face and drawn in each picture's own art style. Do NOT copy any text, letters, words, logos or brand names from them (ignore any lettering on their frames), and never copy their faces, characters, clothing, jewellery, captions or backgrounds.")
 
 
 class StubEditor:
