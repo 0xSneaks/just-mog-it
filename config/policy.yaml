@@ -22,7 +22,7 @@ bankroll_seed_sol: "5"              # 0.14
 priority_fee_cap_sol: "0.005"       # 0.15
 mog_me_enabled: false               # 0.16 off until X media-upload 403 is fixed
 mog_me:                             # "mog me" X flow (bot/mogme_queue.py): owner approval queue
-  autopost: false                   # posting WITHOUT per-item approval; also needs kill switch OFF. Owner only.
+  autopost: false                   # legacy flag; never bypasses approval or the kill switch. Owner only.
   style: "vipers"                   # prompt: bot/mogme_queue.py VIPERS_PROMPT = justmogit-site api/mog.js vipers
   approvers: ["sneaks", "muse"]     # owner 2026-11-07: no humans besides Sneaks; Muse is the bot's friendly voice
                                     # and curates mog replies during testing. Nobody else can approve a post.
