@@ -5,7 +5,7 @@ Mocks only — no network, no keys, no mainnet."""
 import base64, json, os, socket, tempfile, threading, unittest
 from decimal import Decimal
 from pathlib import Path
-from mogit.guard import inspect, GuardError, parse, _cu16, CREATE_DISCRIMINATOR
+from mogit.guard import inspect, GuardError, parse, _cu16, b58, CREATE_DISCRIMINATOR
 from mogit.ledger import Ledger, LedgerError
 from mogit.flow import Session
 
@@ -43,6 +43,16 @@ class Chain:
 
 class Vault:
     def sign(self, tx, th): return "SIGNED:" + th
+
+class SignedVault:
+    """Returns the built tx as-is: the fixtures are real signed txs, so the first
+    signature extracted from the signed payload is a real, checkable value (C2)."""
+    def sign(self, tx, th): return tx
+
+def first_sig_of(tx_b64):
+    raw = base64.b64decode(tx_b64)
+    n, i = _cu16(raw, 0)
+    return b58(raw[i:i + 64])
 
 class Img:
     def verify(self, p): return "deadbeef"
@@ -187,6 +197,17 @@ class Fixes(unittest.TestCase):
         self.assertLess(abs(recorded - (spent - Decimal("15.91"))), Decimal("0.000001"))
         self.assertNotEqual(recorded, Decimal("1.93"))  # not the quoted USD
 
+    def test_delta_zero_sim_commits_the_quote(self):
+        # C1 (claude-code re-review): a sim returning payer_lamports_delta 0 must not
+        # record $0.00 — the committed cost is max(quote, simulated) = the quote.
+        L, _ = make_ledger()
+        m = M(sim={"payer_lamports_delta": 0})
+        sess = Session("grok-bot", L, m, Chain(), Vault(), Img())
+        out = run(sess, *HAPPY, "LAUNCH")
+        self.assertIn("LAUNCHED", out)
+        self.assertEqual(str(L.load()["spent_usd"]), "17.84")  # 15.91 + quoted 1.93, not 15.91 + 0
+        self.assertEqual(L.load()["launches"][0]["cost_usd"], "1.93")
+
     # --- FIX 3: pending reservation before submit, reconciled after ---
     def test_reservation_counts_against_cap(self):
         L, _ = make_ledger(spent="28.07")
@@ -208,14 +229,52 @@ class Fixes(unittest.TestCase):
         with self.assertRaises(LedgerError):
             L.settle(rid, {"mint": "M"})  # already settled
 
-    def test_failed_submit_releases_reservation(self):
+    def test_failed_submit_holds_reservation_unconfirmed(self):
+        # C2 (claude-code re-review): ok:false is NOT a definitive failure — a send
+        # reported failed can still land. The reservation stays, marked unconfirmed,
+        # with the signed tx's first signature recorded in the pending entry.
         L, _ = make_ledger()
         m = M(ok=False)
+        sess = Session("grok-bot", L, m, Chain(), SignedVault(), Img())
+        out = run(sess, *HAPPY, "LAUNCH")
+        self.assertIn("unconfirmed", out)
+        st = L.load()
+        self.assertEqual(len(st["pending"]), 1)
+        entry = st["pending"][0]
+        self.assertEqual(entry["status"], "unconfirmed")
+        self.assertEqual(entry["tx_sig"], first_sig_of(TREMP))  # recorded before submit
+        self.assertEqual(str(st["spent_usd"]), "15.91")         # nothing settled
+        self.assertEqual(st["remaining_usd"], Decimal("30") - Decimal("15.91") - Decimal("1.93"))
+        self.assertEqual(st["launches"], [])
+
+    def test_pre_send_rejection_releases_reservation(self):
+        # C2: the ONLY ok:false path that releases — a definitive pre-send rejection
+        # (preflight/simulation refused, never broadcast), flagged pre_send by the adapter.
+        def pre_send_fail(signed):
+            return {"ok": False, "sig": None, "err": "preflight refused", "pre_send": True}
+        L, _ = make_ledger()
+        m = M(submit_fn=pre_send_fail)
         sess = Session("grok-bot", L, m, Chain(), Vault(), Img())
         out = run(sess, *HAPPY, "LAUNCH")
         self.assertIn("no budget spent", out)
         self.assertEqual(L.load()["pending"], [])
         self.assertEqual(str(L.load()["spent_usd"]), "15.91")
+
+    def test_reconcile_releases_unconfirmed_reservation(self):
+        # C2: an unconfirmed reservation is released only via the reconcile path —
+        # release() is that mechanism (expired blockhash + signature not found).
+        L, _ = make_ledger()
+        m = M(ok=False)
+        sess = Session("grok-bot", L, m, Chain(), SignedVault(), Img())
+        run(sess, *HAPPY, "LAUNCH")
+        st = L.load()
+        self.assertEqual(len(st["pending"]), 1)
+        rid = st["pending"][0]["id"]
+        self.assertTrue(L.release(rid))  # reconcile: blockhash expired, tx_sig not found on-chain
+        st = L.load()
+        self.assertEqual(st["pending"], [])
+        self.assertEqual(st["remaining_usd"], Decimal("30") - Decimal("15.91"))
+        self.assertEqual(str(st["spent_usd"]), "15.91")
 
     def test_submit_exception_holds_reservation(self):
         def boom(signed): raise RuntimeError("timeout after send")

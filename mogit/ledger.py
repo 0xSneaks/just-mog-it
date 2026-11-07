@@ -3,6 +3,9 @@ The ledger is never defaulted: a missing/corrupt ledger is a refusal, not a zero
 FIX 3: a launch reserves its cost as a PENDING entry before submit; the reservation
 counts against the cap until it is settled (send confirmed) or released (send
 definitively failed), so a landed-but-unrecorded launch cannot leak the cap.
+C2: a send merely REPORTED failed is not definitive — the entry is marked
+unconfirmed and keeps counting; only a definitive pre-send rejection or a
+reconcile step (expired blockhash + signature not found) releases it.
 FIX 4: check -> reserve -> settle runs under an exclusive flock on a sidecar lock
 file, so two sessions can never both pass the cap check for the same money."""
 import fcntl, json, os, tempfile, threading, uuid
@@ -108,6 +111,21 @@ class Ledger:
             if self.load()["spent_usd"] != new_spent:
                 raise LedgerError("ledger read-back mismatch on settle")
             return new_spent
+
+    def mark_unconfirmed(self, rid):
+        """C2: mark a pending reservation unconfirmed — the send was reported failed
+        but may still land on-chain, so it keeps counting against the cap until
+        settle() or a reconcile-driven release()."""
+        with self.locked():
+            st = self.load()
+            mine = [p for p in st["pending"] if p["id"] == rid]
+            if not mine:
+                raise LedgerError(f"no pending reservation {rid} to mark unconfirmed")
+            mine[0]["status"] = "unconfirmed"
+            self._save(st, st["spent_usd"], st["launches"], st["pending"])
+            if not any(p["id"] == rid and p["status"] == "unconfirmed" for p in self.load()["pending"]):
+                raise LedgerError("ledger read-back mismatch on mark_unconfirmed")
+            return True
 
     def release(self, rid):
         """Drop a pending reservation without recording spend (send definitively
