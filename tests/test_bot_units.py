@@ -166,8 +166,17 @@ class TestFees(unittest.TestCase):
 class TestReplies(unittest.TestCase):
     def test_launch_reply_plain_text(self):
         d = type("D", (), {"ticker": "BINGUS"})
-        t = replies.launched(d, CA)
+        t = replies.launched(d, CA, "pump.fun")
         self.assertIn(CA, t); self.assertNotIn("pump.fun", t); self.assertNotIn("http", t)
+
+    def test_launch_reply_venue_from_record(self):
+        d = type("D", (), {"ticker": "JOSE"})
+        self.assertIn("on pumpfun.", replies.launched(d, CA, "pump.fun"))
+        m = replies.launched(d, CA, "mogz.fun")
+        self.assertIn("on mogz.", m); self.assertNotIn("pumpfun", m); self.assertNotIn("mogz.fun", m)
+        for bad in (None, "", "float", "raydium"):
+            with self.assertRaises(replies.ReplyError):
+                replies.launched(d, CA, bad)
 
     def test_url_refused(self):
         with self.assertRaises(replies.ReplyError):

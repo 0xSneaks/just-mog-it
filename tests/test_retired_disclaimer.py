@@ -34,7 +34,8 @@ def test_description_template_and_built_metadata():
 
 
 def test_every_reply_template():
-    _clean(replies.launched(SimpleNamespace(ticker="JOSE"), NEW))
+    for venue in replies.VENUE_WORD:
+        _clean(replies.launched(SimpleNamespace(ticker="JOSE"), NEW, venue))
     _clean(replies.payment_request("job1", NEW, "0.02"))
     _clean(replies.wallet_request())
     for code, template in replies.REJECT.items():

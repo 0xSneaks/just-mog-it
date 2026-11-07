@@ -138,6 +138,7 @@ class TestHappyPath(unittest.TestCase):
         row = s.ledger("launch")[0]
         self.assertEqual((row["mint"], row["lamports"]), (mint, 20_300_000))
         self.assertIn(mint, x.replies[-1][1]); self.assertNotIn("http", x.replies[-1][1])
+        self.assertIn("on pumpfun.", x.replies[-1][1])   # venue from the launch record
         built = e.a.pump.built[0]
         self.assertEqual((built["name"], built["symbol"], built["dev_buy_sol"]), ("Bingus", "BINGUS", "0"))
         self.assertTrue(built["description"].startswith("$BINGUS was live on the wrong pair"))

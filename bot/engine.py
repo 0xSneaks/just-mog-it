@@ -29,6 +29,8 @@ class Refused(Exception):
         super().__init__(code)
         self.code, self.kw = code, kw
 
+PUMP_VENUE = "pump.fun"  # the only venue Engine._prepare builds for (bot/live/pumpportal.py)
+
 class Engine:
     def __init__(self, store, policy, adapters, clock=time.time, public=False, *, pair_preview=None):
         if public and pair_preview is not None:
@@ -350,7 +352,7 @@ class Engine:
             raise Refused("pre_sign_failure", error=str(e)) from e
         j = self.s.job(job_id)
         self._move(job_id, ("ARMED",), "SIGNED", tx_sig=sig, attempt_no=j["attempt_no"] + 1)
-        self.s.set_payload(job_id, sim_cost=cost, signed=signed)
+        self.s.set_payload(job_id, sim_cost=cost, signed=signed, venue=PUMP_VENUE)  # _prepare builds via the pump adapter
         try:
             self.a.rpc.send(signed)
         except Exception as e:                                # may still have reached a leader
@@ -441,7 +443,7 @@ class Engine:
     def reply_launch(self, job_id):
         j, pl = self.s.job(job_id), self.s.payload(job_id)
         d = type("D", (), pl["dossier"])
-        text = replies.launched(d, j["mint"])
+        text = replies.launched(d, j["mint"], pl.get("venue"))
         try:
             if not self.budget.try_spend(url=False):
                 raise RuntimeError("reply budget exhausted")

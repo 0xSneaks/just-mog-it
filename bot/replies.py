@@ -17,9 +17,15 @@ def _check(text):
         raise ReplyError("reply over 280 chars")
     return text
 
-def launched(d, mint):
-    # "pump.fun" would auto-link on X and bill as a URL post — write "pumpfun"
-    return _check(f"Mogged. ${d.ticker} was on the wrong pair — relaunched on a SOL pair, on pumpfun.\n"
+# Venue word comes from the launch record. "pump.fun"/"mogz.fun" would auto-link on X and
+# bill as a URL post, so the reply writes the bare name. Unknown venue = no reply (never a false venue).
+VENUE_WORD = {"pump.fun": "pumpfun", "mogz.fun": "mogz"}
+
+def launched(d, mint, venue):
+    word = VENUE_WORD.get(venue)
+    if word is None:
+        raise ReplyError(f"unknown launch venue {venue!r}")
+    return _check(f"Mogged. ${d.ticker} was on the wrong pair — relaunched on a SOL pair, on {word}.\n"
                   f"CA: {mint}")
 
 def payment_request(job_id, address, fee_sol):
