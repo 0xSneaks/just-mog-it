@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JUST MOG IT — Tag the bot. Get a coin.</title>
+<meta name="description" content="JustMogIt is the X bot that launches your memecoin for you. Tag @justmogit_bot with your idea, it builds and launches it on pump.fun, and drops the CA right back in your thread.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Bangers&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ======== THE MOG CAT — one master drawing, reused everywhere ======== -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="lensGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFE600"/>
+      <stop offset="0.45" stop-color="#FF8A00"/>
+      <stop offset="1" stop-color="#FF2E88"/>
+    </linearGradient>
+  </defs>
+  <symbol id="mogcat" viewBox="0 0 560 600">
+    <!-- tail: actually attached, thick, striped -->
+    <g>
+      <path d="M132 486 C 44 486 14 402 58 348 C 70 332 96 336 100 358 C 104 380 84 392 80 414 C 76 440 96 456 128 456" fill="none" stroke="#1a1033" stroke-width="34" stroke-linecap="round"/>
+      <path d="M132 486 C 44 486 14 402 58 348 C 70 332 96 336 100 358 C 104 380 84 392 80 414 C 76 440 96 456 128 456" fill="none" stroke="#FF9F1C" stroke-width="22" stroke-linecap="round"/>
+      <path d="M52 420 L88 408" stroke="#1a1033" stroke-width="8" stroke-linecap="round"/>
+      <path d="M48 452 L86 444" stroke="#1a1033" stroke-width="8" stroke-linecap="round"/>
+    </g>
+    <!-- body / shoulders: narrower, sloped — a chest, not a box -->
+    <path d="M104 600 L104 532 Q104 452 172 430 Q280 410 388 430 Q456 452 456 532 L456 600 Z" fill="#FF9F1C" stroke="#1a1033" stroke-width="8" stroke-linejoin="round"/>
+    <!-- body cel shading + highlight -->
+    <path d="M388 430 Q456 452 456 532 L456 600 L388 600 Q440 510 388 430 Z" fill="#F07F00" opacity="0.45"/>
+    <ellipse cx="195" cy="505" rx="58" ry="30" fill="#FFC46B" opacity="0.55" transform="rotate(-8 195 505)"/>
+    <!-- chunky gold chain -->
+    <path d="M168 458 Q280 528 392 458" fill="none" stroke="#1a1033" stroke-width="17" stroke-linecap="round"/>
+    <path d="M168 458 Q280 528 392 458" fill="none" stroke="#FFD500" stroke-width="10" stroke-linecap="round"/>
+    <path d="M280 494 l8 16 17 2 -12 12 3 17 -16 -9 -16 9 3 -17 -12 -12 17 -2 z" fill="#FFD500" stroke="#1a1033" stroke-width="4" stroke-linejoin="round"/>
+
+    <!-- head, chin-up smug tilt -->
+    <g transform="rotate(-4 280 250)">
+      <!-- ears -->
+      <path d="M152 168 L126 76 L210 128 Z" fill="#FFB340" stroke="#1a1033" stroke-width="8" stroke-linejoin="round"/>
+      <path d="M158 150 L142 100 L190 128 Z" fill="#FF2E88"/>
+      <g transform="rotate(10 400 130)">
+        <path d="M408 168 L434 76 L350 128 Z" fill="#FFB340" stroke="#1a1033" stroke-width="8" stroke-linejoin="round"/>
+        <path d="M402 150 L418 100 L370 128 Z" fill="#FF2E88"/>
+      </g>
+      <!-- skull -->
+      <ellipse cx="280" cy="252" rx="152" ry="140" fill="#FFB340" stroke="#1a1033" stroke-width="8"/>
+      <!-- forehead highlight + right-side shade -->
+      <ellipse cx="238" cy="172" rx="56" ry="22" fill="#FFD28A" opacity="0.7" transform="rotate(-8 238 172)"/>
+      <path d="M392 150 Q430 210 420 300 Q408 372 360 388 Q428 340 428 250 Q428 180 392 150 Z" fill="#F07F00" opacity="0.3"/>
+      <!-- raised smug eyebrow peeking over the shades -->
+      <path d="M172 178 Q212 156 252 170" fill="none" stroke="#1a1033" stroke-width="8" stroke-linecap="round"/>
+      <!-- PIT VIPER shield shades -->
+      <g>
+        <path id="shieldPath" d="M140 212 Q280 178 420 212 L428 254 Q420 296 374 294 Q342 292 332 264 Q326 250 280 250 Q234 250 228 264 Q218 292 186 294 Q140 296 132 254 Z" fill="url(#lensGrad)" stroke="#1a1033" stroke-width="22" stroke-linejoin="round"/>
+        <path d="M140 212 Q280 178 420 212 L428 254 Q420 296 374 294 Q342 292 332 264 Q326 250 280 250 Q234 250 228 264 Q218 292 186 294 Q140 296 132 254 Z" fill="url(#lensGrad)" stroke="#FF2E88" stroke-width="10" stroke-linejoin="round"/>
+        <clipPath id="lensClip">
+          <path d="M140 212 Q280 178 420 212 L428 254 Q420 296 374 294 Q342 292 332 264 Q326 250 280 250 Q234 250 228 264 Q218 292 186 294 Q140 296 132 254 Z"/>
+        </clipPath>
+        <g clip-path="url(#lensClip)">
+          <polygon points="196,196 258,188 214,290 156,296" fill="#ffffff" opacity="0.55"/>
+          <polygon points="298,192 330,188 296,282 268,284" fill="#ffffff" opacity="0.35"/>
+          <!-- the lens reflects a pumping chart. obviously. -->
+          <polyline points="326,284 352,262 372,270 404,228" fill="none" stroke="#00E676" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+          <polygon points="404,228 384,230 398,246" fill="#00E676"/>
+        </g>
+        <!-- temple arms + top bar -->
+        <rect x="114" y="222" width="28" height="18" rx="7" fill="#FF2E88" stroke="#1a1033" stroke-width="5"/>
+        <rect x="418" y="222" width="28" height="18" rx="7" fill="#FF2E88" stroke="#1a1033" stroke-width="5"/>
+        <rect x="260" y="176" width="40" height="13" rx="6" fill="#FF2E88" stroke="#1a1033" stroke-width="5"/>
+      </g>
+      <!-- nose -->
+      <path d="M266 318 L294 318 L280 336 Z" fill="#FF2E88" stroke="#1a1033" stroke-width="5" stroke-linejoin="round"/>
+      <!-- smirk + one fang, big enough to read on a phone -->
+      <path d="M280 350 Q316 380 362 354" fill="none" stroke="#1a1033" stroke-width="8" stroke-linecap="round"/>
+      <path d="M336 362 L354 359 L346 378 Z" fill="#ffffff" stroke="#1a1033" stroke-width="4" stroke-linejoin="round"/>
+      <!-- cheek blush -->
+      <ellipse cx="182" cy="344" rx="18" ry="10" fill="#FF8A7A" opacity="0.55"/>
+      <ellipse cx="386" cy="344" rx="18" ry="10" fill="#FF8A7A" opacity="0.55"/>
+      <!-- whiskers -->
+      <g stroke="#1a1033" stroke-width="5" stroke-linecap="round" fill="none">
+        <path d="M152 332 Q112 324 86 308"/>
+        <path d="M154 350 Q114 352 88 346"/>
+        <path d="M408 332 Q448 324 474 308"/>
+        <path d="M406 350 Q446 352 472 346"/>
+      </g>
+    </g>
+
+    <!-- pointing arm: slashes diagonally across the torso, BIG fist, finger jabs the corner at YOU -->
+    <g>
+      <path d="M505 605 C 480 555 450 520 415 495" fill="none" stroke="#1a1033" stroke-width="46" stroke-linecap="round"/>
+      <path d="M505 605 C 480 555 450 520 415 495" fill="none" stroke="#FFB340" stroke-width="30" stroke-linecap="round"/>
+      <!-- wristband -->
+      <path d="M408 526 L448 494" stroke="#1a1033" stroke-width="26" stroke-linecap="round"/>
+      <path d="M408 526 L448 494" stroke="#FF2E88" stroke-width="15" stroke-linecap="round"/>
+      <!-- THE fist -->
+      <path d="M296 462 Q290 408 344 398 Q392 390 414 424 Q430 456 402 476 Q352 492 314 478 Q294 472 296 462 Z" fill="#FFB340" stroke="#1a1033" stroke-width="8" stroke-linejoin="round"/>
+      <!-- thumb + curled fingers -->
+      <ellipse cx="322" cy="404" rx="18" ry="12" fill="#FFB340" stroke="#1a1033" stroke-width="6" transform="rotate(-18 322 404)"/>
+      <circle cx="322" cy="484" r="12" fill="#FFB340" stroke="#1a1033" stroke-width="5"/>
+      <circle cx="352" cy="490" r="12" fill="#FFB340" stroke="#1a1033" stroke-width="5"/>
+      <circle cx="380" cy="486" r="12" fill="#FFB340" stroke="#1a1033" stroke-width="5"/>
+      <!-- THE finger — foreshortened, pointing at the viewer -->
+      <path d="M415 445 L505 520" stroke="#1a1033" stroke-width="44" stroke-linecap="round"/>
+      <path d="M415 445 L505 520" stroke="#FFB340" stroke-width="30" stroke-linecap="round"/>
+      <circle cx="512" cy="526" r="21" fill="#FFB340" stroke="#1a1033" stroke-width="7"/>
+      <ellipse cx="519" cy="518" rx="10" ry="6" fill="#FFE9C9" stroke="#1a1033" stroke-width="3" transform="rotate(45 519 518)"/>
+      <!-- speed lines -->
+      <path d="M522 470 L548 452" stroke="#1a1033" stroke-width="6" stroke-linecap="round"/>
+      <path d="M540 528 L568 524" stroke="#1a1033" stroke-width="6" stroke-linecap="round"/>
+    </g>
+  </symbol>
+</svg>
+
+<!-- ======== TICKER ======== -->
+<div class="ticker ticker-top" aria-hidden="true">
+  <div class="ticker-track" data-ticker>
+    <span>JUST MOG IT</span><span class="tick-star">★</span><span>TAG THE BOT</span><span class="tick-star">★</span><span>GET MOGGED</span><span class="tick-star">★</span><span>🐱👉</span><span class="tick-star">★</span>
+  </div>
+</div>
+
+<!-- ======== HERO — yellow poster ======== -->
+<header class="hero">
+  <div class="halftone" aria-hidden="true"></div>
+  <div class="hero-inner">
+    <div class="mascot-col">
+      <div class="burst" aria-hidden="true"></div>
+      <div class="mascot-wrap" id="mascotWrap">
+        <svg class="mascot" viewBox="0 0 560 600" role="img" aria-label="The Mog Cat — smug cat in hot pink Pit Viper shades, pointing straight at you">
+          <use href="#mogcat"/>
+        </svg>
+        <div class="starburst" aria-hidden="true"><span>YEAH,<br>YOU!</span></div>
+      </div>
+    </div>
+    <div class="type-col">
+      <p class="hero-kicker">★ THE CAT THAT LAUNCHES COINS ★</p>
+      <h1 class="logo-type">JUST<br><span class="word-mog">MOG</span><br>IT.</h1>
+      <p class="tagline">You had the idea. We have the bot.<br>
+      Tag it, and your coin exists. <strong>That's the whole pitch.</strong></p>
+      <div class="cta-row">
+        <a class="cta cta-main" href="https://x.com/justmogit_bot" target="_blank" rel="noopener">TAG @justmogit_bot 🐱👉</a>
+        <a class="cta cta-ghost" href="#how">SEE HOW ↓</a>
+      </div>
+      <p class="hero-note">LIVE ON PUMP.FUN · CA DROPS RIGHT BACK IN YOUR THREAD</p>
+      <div class="sticker-row" aria-hidden="true">
+        <span class="sticker s1">NO FORMS</span>
+        <span class="sticker s2">NO DASHBOARDS</span>
+        <span class="sticker s3">JUST MOG</span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- ======== MARQUEE DIVIDER ======== -->
+<div class="ticker ticker-mid" aria-hidden="true">
+  <div class="ticker-track ticker-track-rev" data-ticker>
+    <span>TAG THE BOT</span><span class="tick-star">★</span><span>GET MOGGED</span><span class="tick-star">★</span><span>YOUR COIN. YOUR CROWD.</span><span class="tick-star">★</span><span>🐱👉</span><span class="tick-star">★</span>
+  </div>
+</div>
+
+<main>
+  <!-- ======== HOW — hot pink ======== -->
+  <section id="how" class="section how">
+    <h2><span class="h2-kicker">DEAD SIMPLE</span>HOW IT WORKS</h2>
+    <div class="steps">
+      <article class="step step1">
+        <div class="step-num">1</div>
+        <h3>Tag the bot</h3>
+        <p>Post your coin idea on X and tag <strong>@justmogit_bot</strong> — a name, a ticker, a vibe, a picture if you've got one. That's your whole job.</p>
+      </article>
+      <article class="step step2">
+        <div class="step-num">2</div>
+        <h3>The bot mogs it live</h3>
+        <p>The bot builds your coin — metadata, art, pairing checks — and launches it on <strong>pump.fun</strong>. While you're reading replies, it's already trading.</p>
+      </article>
+      <article class="step step3">
+        <div class="step-num">3</div>
+        <h3>CA in your thread</h3>
+        <p>The contract address lands right back in your thread for everyone to see. Your coin. Your crowd. Mogged into existence.</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ======== PERKS — cream ======== -->
+  <section class="section why">
+    <h2><span class="h2-kicker">WHY BOTHER</span>WHAT YOU GET</h2>
+    <div class="perks">
+      <article class="perk perk-yellow">
+        <div class="perk-icon">⚡</div>
+        <h3>Launched in minutes</h3>
+        <p>Tag to trading before your post goes cold. Momentum is the whole game, and the bot doesn't sleep, stall, or ask you to fill in a spreadsheet.</p>
+      </article>
+      <article class="perk perk-lime">
+        <div class="perk-icon">🛠️</div>
+        <h3>The boring parts, handled</h3>
+        <p>Metadata, art, spelling, pairing checks — the unsexy stuff that kills launches gets done by the bot, properly, before your coin ever goes live.</p>
+      </article>
+      <article class="perk perk-orange">
+        <div class="perk-icon">♻️</div>
+        <h3>Fees that recycle</h3>
+        <p>Creator fees don't just sit there — they recycle back into keeping the bot running and launching the next person's coin. The mog compounds.</p>
+      </article>
+      <article class="perk perk-pink">
+        <div class="perk-icon">😎</div>
+        <h3>Bragging rights</h3>
+        <p>Your coin was launched by the cat in the Pit Vipers. Everyone else filled out a form on a website. There's levels to this.</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ======== FINAL CTA — orange ======== -->
+  <section class="section final-cta">
+    <div class="halftone" aria-hidden="true"></div>
+    <div class="mini-cat" aria-hidden="true">
+      <svg viewBox="0 0 560 600"><use href="#mogcat"/></svg>
+    </div>
+    <p class="final-line">STILL READING?<br><span>YOUR COIN COULD'VE<br>BEEN LIVE ALREADY.</span></p>
+    <a class="cta cta-main cta-big" href="https://x.com/justmogit_bot" target="_blank" rel="noopener">JUST MOG IT 🐱👉</a>
+  </section>
+</main>
+
+<footer>
+  <p class="foot-brand">JUST MOG IT</p>
+  <p>Run by <a href="https://x.com/heySneaks" target="_blank" rel="noopener">@heySneaks</a> · Bot: <a href="https://x.com/justmogit_bot" target="_blank" rel="noopener">@justmogit_bot</a></p>
+  <p class="nfa">Memecoins are wildly risky and most go to zero. Nothing here is financial advice — this is a launch bot, not a crystal ball. Only ever play with money you can afford to lose, and do your own research.</p>
+</footer>
+
+<script src="script.js"></script>
+</body>
+</html>
