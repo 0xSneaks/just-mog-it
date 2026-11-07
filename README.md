@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/mog-cat-hero.jpg" width="480" alt="JustMogIt — the mog cat"></p>
+
 # JustMogIt
 
 **Just Mog It.**
