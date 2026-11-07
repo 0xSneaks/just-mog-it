@@ -51,8 +51,10 @@ def build_description(policy, ticker, ca, original):
 def resolve(policy, *, ca, das_asset=None, pump_coin=None, quote_text_match=None, ocr=None):
     """Pick the source of truth and its confidence. Inputs are adapter results (dicts).
     Returns a Dossier or raises DossierError (reject with reply)."""
-    if das_asset and pump_coin and das_asset.get("mint") == ca == pump_coin.get("mint"):
-        src, conf, method, by = pump_coin, 1.0, "ca_onchain", "onchain"
+    if das_asset and das_asset.get("mint") == ca and (pump_coin is None or pump_coin.get("mint") == ca):
+        # on-chain metadata is authoritative; the pump.fun record (when the original lived there)
+        # adds description/socials. Non-pump originals (the wrong-venue case) resolve from DAS.
+        src, conf, method, by = {**das_asset, **(pump_coin or {})}, 1.0, "ca_onchain", "onchain"
     elif quote_text_match and quote_text_match.get("exact"):
         src, conf, method, by = quote_text_match, 0.95, "exact_quote", "exact_quote"
     elif ocr and float(ocr.get("confidence", 0)) >= 0.9:

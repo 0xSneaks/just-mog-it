@@ -1,14 +1,14 @@
 """Adapter contracts. The engine never constructs real I/O; adapters are injected.
 Every default is Unwired: calling it raises, so an unconfigured bot fails CLOSED.
 
-Real adapters still owed (⚠️ HIGH-RISK, need Sneaks's yes + independent review):
+Real adapters live in bot/live/ (⚠️ HIGH-RISK, need Sneaks's yes + independent review):
   x        — X API v2: mentions/stream, user lookup, reply, media upload (OAuth2 + media.write,
              authorized AS @justmogit_bot)
   dossier  — Helius DAS getAsset, pump.fun frontend-api-v3 coins/{mint}, Birdeye, coin snapshot
   pair     — pump.fun create simulation (spec §5)
   pump     — PumpPortal create-tx builder + collectCreatorFee
-  guard    — pump.fun create-ix decoder pinned from a REAL pump.fun create tx (not built:
-             mogit/guard.py is pinned to Mogz/Meteora DBC and does not apply)
+  guard    — bot/pumpguard.py (pump.fun create/buy/claim decoder; pin against a real
+             PumpPortal create tx before live use)
   vault    — signer; keys live only in the vault, never in this repo
   rpc      — dual-RPC send + getSignatureStatuses
   payments — verify the 0.02 SOL fee transfer (job address + memo = job_id)

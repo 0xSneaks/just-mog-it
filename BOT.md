@@ -37,6 +37,10 @@ Status: INTENT/VERIFIED-local. Implements BUILD-SPEC-v2 logic for @justmogit_bot
 
 Order: gates → dossier/eligibility → **then** ask for the 0.02 SOL fee → reserve 0.025 → owner approval → arm → guard + simulate → sign → send.
 
-Run: `python3 -m unittest discover -s tests -v` (121 OK: 67 money core + 54 bot).
+Live adapters (`bot/live/`): X v2 (mentions, reply, chunked media upload), Solana RPC (simulate payer delta, dual send, status, blockhash expiry, PDA), PumpPortal trade-local create + collectCreatorFee with Pinata metadata, DAS + pump.fun + DexScreener dossier, Gemini inspection + eye landmarks, 0.02 SOL payment verifier (memo = job id, no replay), vault signer client. `bot/pumpguard.py` decodes the pump.fun create/buy/claim instructions and refuses anything else. Runner/console: `python3 -m bot.run` (loop --dry-run, status, approve, launch, kill, bankroll).
 
-Still owed (⚠️ HIGH-RISK, Sneaks's yes + independent review): real adapters (X OAuth2 as the bot, Helius/pump.fun/Birdeye reads, PumpPortal create + collectCreatorFee, vault signer, dual RPC, payment verifier, face landmarks), and a **pump.fun create-ix guard pinned from a real pump.fun create tx** — `mogit/guard.py` is pinned to Mogz/Meteora DBC and does not apply.
+Run: `python3 -m unittest discover -s tests -v` (131 OK: 67 money core + 64 bot).
+
+VERIFIED offline only — this build box can't reach X, Solana RPC, pump.fun, PumpPortal, Pinata or Gemini. PDA derivation VERIFIED against two real addresses (Meteora DBC + pump.fun event authorities). Discriminators VERIFIED by sha256 against published values.
+
+Still owed (⚠️ HIGH-RISK, Sneaks's yes + independent review): the vault service itself (keys), one real PumpPortal create tx captured as a fixture to pin `pumpguard.py` (PumpPortal may return create_v2, which the guard refuses until pinned), a dry-run day against live X + RPC, and claude-code review of the money paths.

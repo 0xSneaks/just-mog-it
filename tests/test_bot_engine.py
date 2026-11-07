@@ -38,6 +38,7 @@ class Dossier:
     def pump_coin(self, ca): return {**self.coin, "mint": ca}
     def snapshot(self, ca): return self.snap
     def inspect_image(self, uri): return {"nsfw_score": 0.0}
+    def fee_weight(self, mint): return 1000.0
 
 class Pair:
     def __init__(self, clock, ok=True): self.clock, self.ok = clock, ok
@@ -46,14 +47,16 @@ class Pair:
 class Pump:
     def __init__(self): self.built, self.collected = [], 0
     def build_create(self, **kw): self.built.append(kw); return b"TX"
-    def claimable(self, mint): return 40_000_000
-    def claim_cost(self, mint): return 5_000
-    def collect(self, mint): self.collected += 1; return 40_000_000
+    def claimable(self): return 40_000_000
+    def claim_cost(self): return 5_000
+    def build_claim(self): self.collected += 1; return b"CLAIM"
 
 class Guard:
     def __init__(self, ok=True): self.ok = ok
     def inspect(self, tx, **kw):
         if not self.ok: raise ValueError("guard: name mismatch")
+    def inspect_claim(self, tx):
+        if tx != b"CLAIM": raise ValueError("not a claim")
 
 class Vault:
     def new_mint(self, job_id): return "MintPubkey" + job_id[:6]
@@ -63,7 +66,9 @@ class Vault:
 class Rpc:
     def __init__(self, cost=20_300_000, status="confirmed", expired=False):
         self.cost, self.st, self.expired, self.sent = cost, status, expired, 0
-    def simulate(self, tx): return {"ok": True, "payer_lamports_delta": self.cost}
+    def simulate(self, tx):
+        if tx == b"CLAIM": return {"ok": True, "payer_lamports_delta": -40_000_000}
+        return {"ok": True, "payer_lamports_delta": self.cost}
     def send(self, signed): self.sent += 1
     def status(self, sig, timeout_s): return self.st
     def blockhash_expired(self, sig): return self.expired

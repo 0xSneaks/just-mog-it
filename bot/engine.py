@@ -434,17 +434,43 @@ class Engine:
 
     # ---------------------------------------------------------------- fee loop
     def sweep_fees(self):
-        """Claim creator fees per launched coin when worth it (§9), book the 25/25/50 split."""
-        booked = []
-        for row in self.s.ledger("launch"):
-            mint = row["mint"]
-            claimable = int(self.a.pump.claimable(mint))
-            if not fees.should_claim(self.p, claimable, self.a.pump.claim_cost(mint)):
-                continue
-            got = int(self.a.pump.collect(mint))
-            j = self.s.job(row["job_id"])
-            with self.s.tx() as db:
-                booked.append((mint, fees.record_claim(self.s, self.p, mint, j, got, db)))
+        """pump.fun pools ALL of a creator's fees in one vault and claims them at once, so:
+        claim the vault when worth it (§9), measure what actually landed (simulation delta),
+        then attribute it to coins by volume weight and book 25/25/50 per coin.
+        Weightless remainder (no volume data) goes to the bankroll, ledgered as unattributed."""
+        launched = self.s.ledger("launch")
+        if not launched or self.killed():
+            return []
+        total = int(self.a.pump.claimable())
+        if not fees.should_claim(self.p, total, self.a.pump.claim_cost()):
+            return []
+        tx = self.a.pump.build_claim()
+        self.a.guard.inspect_claim(tx)                         # only collect_creator_fee, bot signs alone
+        sim = self.a.rpc.simulate(tx)
+        gained = -int(sim.get("payer_lamports_delta", 0)) if sim.get("ok") else 0
+        if gained <= 0:
+            return []
+        signed = self.a.vault.sign(tx, "claim")
+        sig = self.a.vault.signature_of(signed)
+        self.a.rpc.send(signed)
+        if self.a.rpc.status(sig, timeout_s=30) not in ("confirmed", "finalized"):
+            self.s.ledger_row("claim_unconfirmed", {"sig": sig, "expected": gained})
+            return []
+        weights = {r["mint"]: max(float(self.a.dossier.fee_weight(r["mint"]) or 0), 0.0) for r in launched}
+        wsum = sum(weights.values())
+        booked, used = [], 0
+        with self.s.tx() as db:
+            for r in launched:
+                share = int(gained * weights[r["mint"]] / wsum) if wsum else 0
+                if share <= 0:
+                    continue
+                used += share
+                booked.append((r["mint"], fees.record_claim(self.s, self.p, r["mint"], self.s.job(r["job_id"]), share, db)))
+            rest = gained - used
+            if rest > 0:
+                self.s.put("bankroll_available", self.s.get("bankroll_available", 0) + rest, db)
+                self.s.ledger_row("fee_unattributed", {"sig": sig}, lamports=rest, db=db)
+            self.s.ledger_row("fee_claim_tx", {"sig": sig, "gained": gained}, lamports=gained, db=db)
         return booked
 
     # ---------------------------------------------------------------- mog me
