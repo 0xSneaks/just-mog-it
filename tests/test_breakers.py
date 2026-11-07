@@ -215,8 +215,7 @@ class Breakers(unittest.TestCase):
         self.assertEqual(g["mint"], "5kDrkzSEGH8jJK2ibjFDX2QEHVuUzPNuRc7eVUpVrzSM")
 
     # --- gate 2 / flow: crash & race holes ---
-    @unittest.expectedFailure  # HOLE-1: builder must refuse, not crash
-    def test_sim_ok_missing_lamports_should_refuse_not_crash(self):
+    def test_sim_ok_missing_lamports_should_refuse_not_crash(self):  # HOLE-1 fixed: refuse, not crash
         """HOLE: sim without err but missing payer_lamports_delta → KeyError instead of REFUSED."""
         m = M(sim={})  # no err, no payer_lamports_delta
         sess = Session("grok-bot", make_ledger()[0], m, Chain(), Vault(), Img())
@@ -278,8 +277,7 @@ class Breakers(unittest.TestCase):
         self.assertEqual(m.sent, [])
 
     # --- content rules / false positives ---
-    @unittest.expectedFailure  # HOLE-2: word-boundary ban needed
-    def test_melon_not_elon_false_positive(self):
+    def test_melon_not_elon_false_positive(self):  # HOLE-2 fixed: word-boundary ban
         """HOLE: substring ban blocks 'Melon' because 'elon' in 'melon'."""
         sess = Session("grok-bot", make_ledger()[0], M(), Chain(), Vault(), Img())
         out = run(sess, "/mogit", "Melon Coin")

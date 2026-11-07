@@ -1,12 +1,18 @@
 """SKILL.md flow as a state machine: preflight -> name -> ticker -> description -> image -> pinned card -> LAUNCH.
 Adapters (injected, never constructed here): mogz (quote/build/simulate/submit), chain (balance),
 vault (sign), images (verify). Gate 2: every tx is simulated and its cost shown before send."""
-import hashlib, json, re, time
+import base64, hashlib, json, re, time
 from decimal import Decimal
 from .guard import inspect, GuardError
 from .ledger import LedgerError
 
 BANNED = {"trump", "elon", "musk", "biden", "nike", "disney"}  # supplemental; real-person/brand needs Sneaks yes
+FEE_TOLERANCE_LAMPORTS = 100_000  # FIX 2 slack over the quote: 2 signatures of base fee plus priority-fee jitter
+
+def _banned_hit(text):
+    """HOLE-2: word-boundary match — 'elon' must not block 'Melon'."""
+    t = text.lower()
+    return any(re.search(r"\b" + re.escape(b) + r"\b", t) for b in BANNED)
 HYPE = re.compile(r"moon|100x|1000x|gem|pump|lfg|wagmi|[\U0001F300-\U0001FAFF]", re.I)
 QUOTE_TTL = 90
 
@@ -50,7 +56,7 @@ class Session:
 
     def _name(self, t):
         if not 1 <= len(t) <= 32: return self._retry("name must be 1-32 chars")
-        if any(b in t.lower() for b in BANNED) and t.lower() not in self.yes:
+        if _banned_hit(t) and t.lower() not in self.yes:
             return self._retry("real person/brand needs Sneaks's explicit yes")
         self.coin["name"] = t
         d = re.sub(r"[^A-Z0-9]", "", t.upper())[:6]
@@ -86,11 +92,23 @@ class Session:
         except GuardError as e: return self._refuse(f"guard: {e}")
         sim = self.mogz.simulate(tx)               # Gate 2: simulate, show cost
         if sim.get("err"): return self._refuse(f"simulation failed: {sim['err']}")
+        delta = sim.get("payer_lamports_delta")
+        if delta is None: return self._refuse("simulation missing payer_lamports_delta")  # HOLE-1: refuse, never KeyError
+        spend = -int(delta)                        # lamports the payer actually loses in simulation
+        if spend < 0: return self._refuse("simulation delta positive: payer would gain lamports")
+        quote_lamports = int(Decimal(str(q["sol"])) * 1_000_000_000)
+        if spend > quote_lamports + FEE_TOLERANCE_LAMPORTS:  # FIX 2: simulated spend checked against the quote
+            return self._refuse(f"simulated cost {spend} lamports exceeds quote {quote_lamports} + fee tolerance")
+        actual_usd = (Decimal(spend) * Decimal(str(q["usd"])) / Decimal(quote_lamports)
+                      if quote_lamports else Decimal(str(q["usd"])))  # FIX 2: commit the actual cost, not the quote
+        tx_bytes = base64.b64decode(tx) if isinstance(tx, str) else bytes(tx)
         card = {"coin.name": c["name"], "coin.ticker": c["ticker"], "coin.description": c["description"],
-                "coin.image_sha256": c["image_sha256"], "cost.sol": str(q["sol"]), "cost.usd": str(q["usd"]),
-                "sim.lamports_delta": sim["payer_lamports_delta"], "wallet.address": g["fee_payer"],
+                "coin.image_sha256": c["image_sha256"], "tx.name": g["name"], "tx.symbol": g["symbol"],
+                "tx.uri": g["uri"], "tx.sha256": hashlib.sha256(tx_bytes).hexdigest(),
+                "cost.sol": str(q["sol"]), "cost.usd": str(actual_usd), "cost.quoted_usd": str(q["usd"]),
+                "sim.lamports_delta": delta, "wallet.address": g["fee_payer"],
                 "wallet.balance_sol": str(bal), "budget.spent_usd": str(st["spent_usd"]),
-                "budget.remaining_usd": str(st["remaining_usd"] - Decimal(str(q["usd"]))),
+                "budget.remaining_usd": str(st["remaining_usd"] - actual_usd),
                 "mint": g["mint"], "quote.expires_at": self.clock() + QUOTE_TTL}
         card["terms_hash"] = hashlib.sha256(json.dumps(card, sort_keys=True).encode()).hexdigest()
         self.card, self.tx, self.state = card, tx, "confirm"
@@ -101,10 +119,25 @@ class Session:
         if self.clock() > self.card["quote.expires_at"]: return self._render() + "\n(quote expired: re-quoted)"
         h = dict(self.card); th = h.pop("terms_hash")
         if hashlib.sha256(json.dumps(h, sort_keys=True).encode()).hexdigest() != th: return self._refuse("terms changed")
-        try: self._preflight(); inspect(self.tx, self.card["mint"])
-        except (LedgerError, GuardError) as e: return self._refuse(e)
-        res = self.mogz.submit(self.vault.sign(self.tx, self.card["terms_hash"]))
-        if not res.get("ok"): return self._refuse(f"launch failed: {res.get('err')}; no budget spent")
-        self.ledger.commit(self.card["cost.usd"], {"mint": self.card["mint"], "tx": res["sig"], "terms_hash": th})
-        self.state = "idle"
-        return f"LAUNCHED mint {self.card['mint']} tx {res['sig']}"
+        tx_bytes = base64.b64decode(self.tx) if isinstance(self.tx, str) else bytes(self.tx)
+        if hashlib.sha256(tx_bytes).hexdigest() != self.card["tx.sha256"]: return self._refuse("terms changed")
+        with self.ledger.locked():  # FIX 4: check -> reserve -> submit -> settle, one session at a time
+            try: self._preflight(); inspect(self.tx, self.card["mint"])
+            except (LedgerError, GuardError) as e: return self._refuse(e)
+            cost = self.card["cost.usd"]
+            try: rid = self.ledger.reserve(cost, {"mint": self.card["mint"], "terms_hash": th})  # FIX 3: pending BEFORE submit
+            except LedgerError as e: return self._refuse(e)
+            try: res = self.mogz.submit(self.vault.sign(self.tx, th))
+            except Exception as e:  # outcome unknown (e.g. timeout after send): keep the reservation against the cap
+                return self._refuse(f"submit error: {e}; outcome unknown, reservation {rid} held against the cap")
+            if not res.get("ok"):
+                self.ledger.release(rid)
+                return self._refuse(f"launch failed: {res.get('err')}; no budget spent")
+            record = {"mint": self.card["mint"], "tx": res["sig"], "terms_hash": th, "cost_usd": cost}
+            try: self.ledger.settle(rid, record)
+            except Exception as e:  # FIX 3: a settle failure after a successful send must not lose the spend record
+                self.state = "idle"
+                return (f"LAUNCHED mint {self.card['mint']} tx {res['sig']} "
+                        f"(WARNING: ledger settle failed: {e}; pending reservation retained and still counts against the cap)")
+            self.state = "idle"
+            return f"LAUNCHED mint {self.card['mint']} tx {res['sig']}"
