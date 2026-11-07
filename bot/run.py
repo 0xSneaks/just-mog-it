@@ -17,7 +17,7 @@ Live mode refuses to boot without policy x_reply_approval_ref (X's written appro
 Env (names only, values never in the repo): JMI_DB, JMI_BOT_WALLET, JMI_FEE_ADDRESS,
 JMI_X_BOT_USER_ID, JMI_X_USER_TOKEN, JMI_RPC_URLS, JMI_DAS_URL, JMI_PINATA_JWT,
 JMI_GEMINI_KEY, JMI_GEMINI_MODEL, JMI_VAULT_URL, JMI_VAULT_TOKEN,
-JMI_MOG_API_URL (justmogit-site /api/mog, https), JMI_VERCEL_BYPASS, JMI_MOGME_QUEUE"""
+IMAGE_EDITOR (stub|gemini, default stub), GEMINI_API_KEY (gemini only), JMI_MOGME_QUEUE"""
 import os
 import sys
 import time
@@ -70,14 +70,10 @@ class _Pair:
         return {"launchable": quote == "SOL", "expires_at": time.time() + 60}
 
 def mogme_flow(store, p, x):
-    """The "mog me" approval queue, or None when the shared edit endpoint is not configured."""
-    from .mogme_queue import MogMeFlow, SiteMogEditor
-    url = os.environ.get("JMI_MOG_API_URL", "").strip()
-    if not url:
-        return None
-    editor = SiteMogEditor(url, style=p.raw["mog_me"]["style"],
-                           bypass=os.environ.get("JMI_VERCEL_BYPASS", "").strip() or None)
-    return MogMeFlow(store, p, x, editor, os.environ.get("JMI_MOGME_QUEUE", "mogme_queue"))
+    """The "mog me" approval queue. IMAGE_EDITOR picks the editor (default stub); gemini without
+    GEMINI_API_KEY raises MogMeConfigError, which refuses boot."""
+    from .mogme_queue import MogMeFlow, build_editor
+    return MogMeFlow(store, p, x, build_editor(), os.environ.get("JMI_MOGME_QUEUE", "mogme_queue"))
 
 def loop(dry_run):
     store = Store(os.environ.get("JMI_DB", "justmogit.db"))
@@ -114,9 +110,10 @@ def mogme_cmd(cmd, args):
     store = Store(os.environ.get("JMI_DB", "justmogit.db"))
     p = load()
     x = XClient()
-    flow = mogme_flow(store, p, x)
-    if flow is None:
-        print("JMI_MOG_API_URL not set: the shared /api/mog edit is not configured"); return 2
+    try:
+        flow = mogme_flow(store, p, x)
+    except MogMeError as err:
+        print("refused at boot:", err); return 2
     if cmd == "mogme-preview":                 # read-only on X: mentions in, previews to disk
         ms, newest = x.mentions(store.get("mogme_preview_since_id"))
         for m in ms:

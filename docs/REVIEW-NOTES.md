@@ -41,6 +41,7 @@ Open question: legacy ledger entries without `ts` count as today, so a real ledg
 | `bot/engine.py` | `mog_me` no longer renders, uploads or replies. It delegates to the queue (`mogme=` kwarg). With no queue wired it returns `mog_me_unwired`. |
 | `bot/live/x.py` | `mentions()` adds `is_retweet` and the author's `profile_image_url`; new `profile_image_url(uid)`. |
 | `bot/run.py` | New `mogme-preview`, `mogme-list`, `mogme-approve`, `mogme-reject` and `mogme-post` commands. `loop` wires the queue when `JMI_MOG_API_URL` is set. |
+| `bot/mogme_queue.py` (pass 4) | `ineligible()` checks ≥ 60 followers + verified_type ∈ {blue, business, government}. A missing field means skip. `_follows_bot` needs `connection_status` to contain `followed_by`: taken from the mention expansion, else one lookup booked at $0.010; a failure means not following. `edit_pfp()` interface: `StubEditor` (default) and `GeminiEditor` (verbatim vipers prompt). `build_editor` refuses gemini without a key and refuses unknown values. Stub items are never posted. The earlier `/api/mog` caller (`SiteMogEditor`) is removed. |
 | `mogit/bot.py` | `listen()` raises SystemExit. It used to reply on X with no approval, kill switch or budget. |
 | `config/policy.yaml`, `bot/policy.py` | New required `mog_me` block: `autopost: false`, `style`, and UNVERIFIED prices. |
 

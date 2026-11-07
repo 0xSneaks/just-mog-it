@@ -8,7 +8,19 @@ There are two separate paths in this repo. Neither has launched a coin. Launch #
 | `bot/` | **X engine** (mentions → gates → dossier → reservation → fire → reply) plus the **pump.fun pipeline** (PumpPortal create, pump guard). | Logic BUILT offline with fake adapters. The pump.fun pipeline is SPECCED and has never launched. |
 
 DeepSeek pair evaluator (`bot/live/deepseek.py`, `deepseek-flash`) is connected and working. See Actions run 42407864926 (success/PASS) and `docs/DEEPSEEK-TIMEOUT.md`.
-**"mog me" on X** (`bot/mogme_queue.py`): the mention author's own PFP, edited by the shared Gemini endpoint (justmogit-site `api/mog.js`, branch `pfp-changer`; the prompt lives there only), plus a small GET MOGGED tag. The default is PREVIEW: items go to an approval queue on disk. `mogme-post` posts only APPROVED items, and only with the kill switch OFF. `mog_me.autopost` stays false. Limits: 1 per author per rolling 24 h, and a daily cap of floor($0.30 / $0.069) = 4, shared with the reply budget. The legacy `mogit/bot.py` listener refuses to start, because it posted without approval.
+**"mog me" on X** (`bot/mogme_queue.py`):
+- **Who gets mogged:** only the mention author, using their own PFP.
+- **Eligibility:** the author needs ≥ 60 followers, a checkmark (blue, business or government) and must follow @justmogit_bot. These are read from the user fields that come with that mention read. Anything missing or failed means a silent skip.
+- **Editor:** set by `IMAGE_EDITOR`, either `stub` (the default: a fixed test image, no network, never postable) or `gemini`, which needs `GEMINI_API_KEY` or boot is refused. The Gemini prompt is a verbatim copy of justmogit-site `api/mog.js` `vipers`.
+- **Posting:** previews go to an approval queue. `mogme-post` posts only APPROVED gemini items, and only with the kill switch OFF.
+- **Limits:** 1 per author per rolling 24 h; daily cap floor($0.30 / $0.069) = 4, shared with the reply budget.
+- The legacy `mogit/bot.py` listener refuses to start.
+
+**Monday switch to Gemini:**
+1. Put `GEMINI_API_KEY` in the bot's runtime env.
+2. Set `IMAGE_EDITOR=gemini`.
+3. Run `python3 -m bot.run mogme-preview` once, then `python3 -m bot.run mogme-list`, and look at the PNG. Nothing posts.
+
 `bot/callout.py` (mogz.fun callouts) is parked with mogz. Do not extend it unless a venue decision revives mogz callouts.
 
 Run: `pip install -r requirements.txt && python3 -m pytest -q`

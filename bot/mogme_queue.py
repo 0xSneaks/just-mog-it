@@ -2,11 +2,12 @@
 approval queue. Nothing posts unless the owner approved the item (or autopost is True AND
 the kill switch is OFF; both are off by default).
 
-Pipeline (per mention): skip retweets / own posts / duplicates → 1 per author per rolling 24h
+Pipeline (per mention): skip retweets / own posts / duplicates → eligibility (>= 60 followers AND a
+checkmark AND follows @justmogit_bot; silent skip otherwise) → 1 per author per rolling 24h
 → daily cap + shared $/day reply budget → target = the mention AUTHOR's avatar only (never
 another tagged user, never an attached image) → hardened fetch (https, pbs.twimg.com only,
-no redirects, 10 s, 5 MB, jpeg/png/webp by header AND magic bytes) → shared Gemini edit
-(justmogit-site /api/mog, branch pfp-changer; no second copy of the prompt here) → small
+no redirects, 10 s, 5 MB, jpeg/png/webp by header AND magic bytes) → edit_pfp() via IMAGE_EDITOR=stub|gemini
+(default stub; gemini needs GEMINI_API_KEY or boot is refused) → small
 "GET MOGGED" tag bottom-right → queue item PENDING (PNG + JSON on disk).
 A refused/failed edit is logged and nothing is queued or retried. A default avatar or a failed
 fetch queues a polite text-only draft (still needs approval to post)."""
@@ -147,16 +148,44 @@ def httpx_get(url, timeout, max_bytes):
         return r.status_code, dict(r.headers), body
 
 
-# ------------------------------------------------------------------ shared Gemini edit
-class SiteMogEditor:
-    """The shared Gemini edit: POST {image, style} to justmogit-site /api/mog (branch
-    pfp-changer, api/mog.js). The prompt lives there only. Env: JMI_MOG_API_URL (https), and
-    JMI_VERCEL_BYPASS when the deployment sits behind Vercel protection. No retry, ever."""
+# ------------------------------------------------------------------ image editors
+VERIFIED_TYPES = frozenset({"blue", "business", "government"})
+MIN_FOLLOWERS = 60
+GEMINI_MODEL = "gemini-2.5-flash-image"
+GEMINI_TIMEOUT_S = 55
+# Verbatim copy of PROMPTS.vipers in justmogit-site api/mog.js (branch pfp-changer @ cc65e34).
+# Keep the two in sync: the site endpoint is the reference.
+VIPERS_PROMPT = (
+    "Edit this profile photo: put oversized rainbow-gradient Pit Viper shield "
+    "sunglasses on the person's face, perfectly fitted and realistic. Add subtle "
+    "neon pink and cyan glitch streaks around the edges of the frame. Keep the "
+    "person's face, pose, clothing and background otherwise unchanged and "
+    "photorealistic. Square 1:1 profile picture, face centered.")
 
-    def __init__(self, url, style="vipers", post=None, bypass=None):
-        if urlparse(url or "").scheme != "https":
-            raise MogMeConfigError("mog API url must be https")
-        self.url, self.style, self._bypass = url, style, bypass
+
+class StubEditor:
+    """No network. Returns one fixed test image. Items it produces can never be posted."""
+    name = "stub"
+
+    def edit_pfp(self, image_bytes):
+        im = Image.new("RGB", (512, 512), (20, 20, 20))
+        d = ImageDraw.Draw(im)
+        for k in range(0, 512, 32):
+            d.line((k, 0, 0, k), fill=(255, 46, 147), width=4)
+        d.rounded_rectangle((96, 200, 416, 280), radius=30, fill=(0, 214, 201))
+        d.text((200, 228), "STUB PREVIEW", fill=(0, 0, 0))
+        out = io.BytesIO(); im.save(out, "PNG"); return out.getvalue()
+
+
+class GeminiEditor:
+    """Same request as justmogit-site api/mog.js: generateContent with the vipers prompt and the
+    image inline. No retry. A safety block or a response with no image raises EditRefused."""
+    name = "gemini"
+
+    def __init__(self, api_key, model=GEMINI_MODEL, post=None):
+        if not api_key or not str(api_key).strip():
+            raise MogMeConfigError("GEMINI_API_KEY missing")
+        self._key, self.model = str(api_key).strip(), model
         self._post = post or self._httpx_post
 
     @staticmethod
@@ -168,25 +197,52 @@ class SiteMogEditor:
         except ValueError:
             return r.status_code, {}
 
-    def edit(self, data, mime):
-        headers = {"x-vercel-protection-bypass": self._bypass} if self._bypass else {}
-        body = {"image": f"data:{mime};base64," + base64.b64encode(data).decode(), "style": self.style}
+    def edit_pfp(self, image_bytes):
+        mime = _sniff(image_bytes)
+        if mime is None:
+            raise EditRefused("bad_input_image")
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
+        body = {"contents": [{"parts": [{"text": VIPERS_PROMPT},
+                                        {"inline_data": {"mime_type": mime,
+                                                         "data": base64.b64encode(image_bytes).decode()}}]}]}
         try:
-            status, out = self._post(self.url, json=body, timeout=EDIT_TIMEOUT_S, headers=headers)
+            status, out = self._post(url, json=body, timeout=GEMINI_TIMEOUT_S,
+                                     headers={"Content-Type": "application/json", "x-goog-api-key": self._key})
         except Exception as e:
             raise EditRefused(f"edit_unavailable:{type(e).__name__}") from None
         if status != 200 or not isinstance(out, dict):
-            raise EditRefused(f"{(out or {}).get('error', 'edit_failed') if isinstance(out, dict) else 'edit_failed'}:{status}")
-        m = re.fullmatch(r"data:(image/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=\s]+)", str(out.get("image", "")))
-        if not m:
-            raise EditRefused("no_image_returned")
+            raise EditRefused(f"edit_failed:{status}")
+        block = (out.get("promptFeedback") or {}).get("blockReason")
+        if block:
+            raise EditRefused(f"safety_block:{block}")
         try:
-            img = base64.b64decode(m.group(2), validate=False)
-        except (binascii.Error, ValueError):
-            raise EditRefused("no_image_returned") from None
-        if _sniff(img) is None:
-            raise EditRefused("no_image_returned")
-        return img
+            parts = out["candidates"][0]["content"]["parts"]
+        except (KeyError, IndexError, TypeError):
+            reason = ((out.get("candidates") or [{}])[0] or {}).get("finishReason", "no_image_returned")
+            raise EditRefused(f"no_image_returned:{reason}") from None
+        for part in parts if isinstance(parts, list) else []:
+            inline = (part or {}).get("inlineData") or (part or {}).get("inline_data")
+            if inline and inline.get("data"):
+                try:
+                    img = base64.b64decode(inline["data"])
+                except (binascii.Error, ValueError):
+                    break
+                if _sniff(img):
+                    return img
+                break
+        raise EditRefused("no_image_returned")
+
+
+def build_editor(env=None):
+    """IMAGE_EDITOR=stub (default) | gemini. gemini without GEMINI_API_KEY refuses (fail closed);
+    an unknown value refuses. Never falls back silently."""
+    env = os.environ if env is None else env
+    kind = (env.get("IMAGE_EDITOR") or "stub").strip().lower()
+    if kind == "stub":
+        return StubEditor()
+    if kind == "gemini":
+        return GeminiEditor(env.get("GEMINI_API_KEY", ""), model=(env.get("GEMINI_IMAGE_MODEL") or GEMINI_MODEL).strip())
+    raise MogMeConfigError(f"IMAGE_EDITOR must be stub or gemini, got {kind!r}")
 
 
 def add_tag(data):
@@ -210,6 +266,19 @@ def add_tag(data):
     out = io.BytesIO()
     canvas.convert("RGB").save(out, "PNG")
     return out.getvalue()
+
+
+def ineligible(m):
+    """Hard gate, fail closed. Reads followers_count + verified_type from the user fields that
+    came with THIS mention read (never cached across requests). Returns a reason or None."""
+    followers, vtype = m.get("followers_count"), m.get("verified_type")
+    if isinstance(followers, bool) or not isinstance(followers, int) or not isinstance(vtype, str):
+        return "missing_fields"
+    if followers < MIN_FOLLOWERS:
+        return "followers_lt_60"
+    if vtype.lower() not in VERIFIED_TYPES:
+        return "not_verified"
+    return None
 
 
 # ------------------------------------------------------------------ the flow
@@ -238,6 +307,9 @@ class MogMeFlow:
         if self.s.get(f"mogme_seen:{mid}"):
             return ("ignored", "duplicate")
         self.s.put(f"mogme_seen:{mid}", True)
+        why = ineligible(m)                              # free: fields come with the mention read
+        if why:
+            return self._silent(mid, uid, why)
         now, day = self.clock(), self.day()
         last = self.s.get(f"mogme_last:{uid}")
         if isinstance(last, (int, float)) and now - last < COOLDOWN_S:
@@ -248,9 +320,12 @@ class MogMeFlow:
             return ("ignored", "config")
         if int(self.s.get(f"mogme_count:{day}", 0)) >= cap:
             return ("ignored", "daily_cap")
-        spent = Decimal(self.s.get(f"reply_spend:{day}", "0")) + Decimal(self.s.get(f"gemini_spend:{day}", "0"))
+        spent = sum((Decimal(self.s.get(f"{k}:{day}", "0")) for k in ("reply_spend", "gemini_spend", "x_read_spend")),
+                    Decimal("0"))
         if spent + per > _usd(self.p.raw["reply_budget_usd_per_day"], "reply_budget_usd_per_day"):
             return ("ignored", "budget")
+        if not self._follows_bot(m, uid, day):           # last gate: may cost one user read
+            return self._silent(mid, uid, "not_following")
         handle = str(m.get("handle") or "you")
         try:                                             # AUTHOR's avatar only
             url = m.get("profile_image_url")
@@ -272,12 +347,32 @@ class MogMeFlow:
         gem = _usd(self.p.raw["mog_me"]["costs_usd"]["gemini_image"], "gemini_image")
         self.s.put(f"gemini_spend:{day}", str(Decimal(self.s.get(f"gemini_spend:{day}", "0")) + gem))
         try:
-            edited = self.editor.edit(raw, mime)
+            edited = self.editor.edit_pfp(raw)
         except EditRefused as e:
             self.s.ledger_row("mogme_refused", {"mention_id": mid, "author_id": uid, "reason": str(e)})
             return ("mog_me_refused", str(e))
         self._save(mid, uid, handle, add_tag(edited), replies.mog_me_done(handle))
         return ("mog_me_queued", mid)
+
+    def _silent(self, mid, uid, reason):
+        """Ineligible: no reply, no image, no edit. Logged only."""
+        self.s.ledger_row("mogme_ineligible", {"mention_id": mid, "author_id": uid, "reason": reason})
+        return ("ignored", reason)
+
+    def _follows_bot(self, m, uid, day):
+        """connection_status (relative to the bot's user token) must contain "followed_by".
+        Taken from the mention's author expansion when present (no extra call); otherwise one
+        GET /2/users/:id?user.fields=connection_status, booked as a user read. Any failure = no."""
+        cs = m.get("connection_status")
+        if cs is None:
+            try:
+                cs = self.x.connection_status(uid)
+            except Exception:
+                cs = None
+            finally:
+                cost = _usd(self.p.raw["mog_me"]["costs_usd"]["user_read"], "user_read")
+                self.s.put(f"x_read_spend:{day}", str(Decimal(self.s.get(f"x_read_spend:{day}", "0")) + cost))
+        return isinstance(cs, (list, tuple)) and "followed_by" in cs
 
     # -------------------------------------------------- queue
     def _path(self, mid):
@@ -300,6 +395,7 @@ class MogMeFlow:
                      "reply_text": text, "image_path": img_path,
                      "image_sha256": hashlib.sha256(png).hexdigest() if png else None,
                      "note": note, "status": PENDING, "created_at": self.clock(),
+                     "editor": getattr(self.editor, "name", "unknown") if png is not None else None,
                      "approved_by": None, "reply_id": None})
 
     def get(self, mid):
@@ -346,6 +442,10 @@ class MogMeFlow:
         done = []
         for it in self.items():
             if not (it["status"] == APPROVED or (autopost and it["status"] == PENDING)):
+                continue
+            if it.get("image_path") and it.get("editor") != "gemini":
+                it["status"], it["note"] = REJECTED, "stub/unknown editor image never posts"
+                self._write(it)
                 continue
             if not self.budget.try_spend(url=False):
                 break

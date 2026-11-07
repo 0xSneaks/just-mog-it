@@ -37,6 +37,16 @@ class X:
     def profile_image_url(self, uid):
         self.lookups.append(uid); return f"https://pbs.twimg.com/profile_images/{uid}/me_normal.png"
 
+    follow_lookups = None
+
+    def connection_status(self, uid):
+        self.follow_lookups = (self.follow_lookups or []) + [uid]
+        if isinstance(self.follow_answer, Exception):
+            raise self.follow_answer
+        return self.follow_answer
+
+    follow_answer = ["followed_by"]
+
     def upload_media(self, data, alt_text=None):
         self.media.append((data, alt_text)); return f"m{len(self.media)}"
 
@@ -55,11 +65,13 @@ class Fetch:
 
 
 class Editor:
+    name = "gemini"                                  # stands in for the real editor in tests
+
     def __init__(self, refuse=False):
         self.refuse, self.calls = refuse, []
 
-    def edit(self, data, mime):
-        self.calls.append((data, mime))
+    def edit_pfp(self, data):
+        self.calls.append(data)
         if self.refuse:
             raise mq.EditRefused("safety_block")
         return png((512, 512), (255, 46, 147))
@@ -72,7 +84,8 @@ class Clock:
 
 def mention(i, author="111", text="@justmogit_bot mog me", **kw):
     return {"id": str(i), "author_id": author, "handle": f"user{author}", "text": text,
-            "profile_image_url": AVATAR, **kw}
+            "profile_image_url": AVATAR, "followers_count": 60, "verified_type": "blue",
+            "connection_status": ["followed_by"], **kw}
 
 
 def flow(tmp=None, x=None, editor=None, fetch=None, clock=None, policy_over=None, kill=True):
@@ -276,24 +289,117 @@ def test_gemini_refusal_no_post_no_queue_no_retry():
     assert store.ledger("mogme_refused")
 
 
-def test_site_editor_refusal_and_success():
+def test_gemini_editor_request_and_refusals_mocked():
+    import base64
     calls = []
 
     def post(url, json, timeout, headers):
-        calls.append((url, json["style"], headers)); return post.resp
-    post.resp = (502, {"error": "no_image_returned"})
-    ed = mq.SiteMogEditor("https://example.vercel.app/api/mog", post=post, bypass="fixture-only")
-    with pytest.raises(mq.EditRefused):
-        ed.edit(jpeg(), "image/jpeg")
-    import base64
-    post.resp = (200, {"image": "data:image/png;base64," + base64.b64encode(png()).decode()})
-    assert ed.edit(jpeg(), "image/jpeg")[:8] == b"\x89PNG\r\n\x1a\n"
-    assert calls[0][1] == "vipers" and calls[0][2] == {"x-vercel-protection-bypass": "fixture-only"}
-    post.resp = (200, {"image": "data:text/html;base64,PGh0bWw+"})
-    with pytest.raises(mq.EditRefused):
-        ed.edit(jpeg(), "image/jpeg")
-    with pytest.raises(mq.MogMeConfigError):
-        mq.SiteMogEditor("http://insecure.example/api/mog", post=post)
+        calls.append((url, json, headers)); return post.resp
+    ed = mq.GeminiEditor("fixture-only", post=post)
+    post.resp = (200, {"candidates": [{"content": {"parts": [
+        {"inlineData": {"mimeType": "image/png", "data": base64.b64encode(png()).decode()}}]}}]})
+    assert ed.edit_pfp(jpeg())[:8] == b"\x89PNG\r\n\x1a\n"
+    url, body, headers = calls[0]
+    assert url.endswith("/models/gemini-2.5-flash-image:generateContent")
+    assert body["contents"][0]["parts"][0]["text"] == mq.VIPERS_PROMPT
+    assert body["contents"][0]["parts"][1]["inline_data"]["mime_type"] == "image/jpeg"
+    assert headers["x-goog-api-key"] == "fixture-only"
+    for resp in [(200, {"promptFeedback": {"blockReason": "SAFETY"}}),
+                 (200, {"candidates": [{"finishReason": "IMAGE_SAFETY"}]}),
+                 (200, {"candidates": [{"content": {"parts": [{"text": "I can't edit that"}]}}]}),
+                 (400, {"error": {"message": "x"}}), (500, {})]:
+        post.resp = resp
+        with pytest.raises(mq.EditRefused):
+            ed.edit_pfp(jpeg())
+    assert len(calls) == 6                            # one call per edit, never retried
+
+
+def test_stub_editor_fixed_image_no_network(monkeypatch):
+    import socket
+    monkeypatch.setattr(socket, "socket", lambda *a, **k: (_ for _ in ()).throw(AssertionError("network")))
+    a, b = mq.StubEditor().edit_pfp(jpeg()), mq.StubEditor().edit_pfp(png())
+    assert a == b and a[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_build_editor_selection_fail_closed():
+    assert isinstance(mq.build_editor({}), mq.StubEditor)                       # default = stub
+    assert isinstance(mq.build_editor({"IMAGE_EDITOR": "stub", "GEMINI_API_KEY": "k"}), mq.StubEditor)
+    assert isinstance(mq.build_editor({"IMAGE_EDITOR": "gemini", "GEMINI_API_KEY": "fixture-only"}), mq.GeminiEditor)
+    for env in ({"IMAGE_EDITOR": "gemini"}, {"IMAGE_EDITOR": "gemini", "GEMINI_API_KEY": "  "},
+                {"IMAGE_EDITOR": "dalle", "GEMINI_API_KEY": "k"}):
+        with pytest.raises(mq.MogMeConfigError):
+            mq.build_editor(env)
+
+
+def test_stub_items_queue_but_never_post():
+    x = X(); store = Store(clock=Clock()); store.put("kill", False)
+    f = mq.MogMeFlow(store, load(), x, mq.StubEditor(), tempfile.mkdtemp(), fetch=Fetch(), clock=Clock())
+    assert f.handle(mention(1)) == ("mog_me_queued", "1")
+    assert f.get("1")["editor"] == "stub"
+    f.approve("1", "sneaks")
+    assert f.post_ready() == []
+    assert x.replies == [] and x.media == []
+    assert f.get("1")["status"] == mq.REJECTED
+
+
+# ------------------------------------------------------------------ eligibility (silent, fail closed)
+@pytest.mark.parametrize("fields,result", [
+    ({"followers_count": 59, "verified_type": "blue"}, ("ignored", "followers_lt_60")),
+    ({"followers_count": 60, "verified_type": "blue"}, ("mog_me_queued", "1")),
+    ({"followers_count": 60, "verified_type": "business"}, ("mog_me_queued", "1")),
+    ({"followers_count": 60, "verified_type": "government"}, ("mog_me_queued", "1")),
+    ({"followers_count": 60, "verified_type": "none"}, ("ignored", "not_verified")),
+    ({"followers_count": 60, "verified_type": None}, ("ignored", "missing_fields")),
+    ({"followers_count": None, "verified_type": "blue"}, ("ignored", "missing_fields")),
+    ({"followers_count": "60", "verified_type": "blue"}, ("ignored", "missing_fields")),
+    ({"followers_count": True, "verified_type": "blue"}, ("ignored", "missing_fields")),
+])
+def test_eligibility_gate(fields, result):
+    x, fetch, ed = X(), Fetch(), Editor()
+    f, store = flow(x=x, fetch=fetch, editor=ed)
+    m = mention(1); m.update(fields)
+    assert f.handle(m) == result
+    if result[0] == "ignored":
+        assert fetch.urls == [] and ed.calls == [] and f.get("1") is None and x.replies == []
+        assert json.loads(store.ledger("mogme_ineligible")[0]["body"])["reason"] == result[1]
+
+
+def test_missing_eligibility_keys_skip():
+    ed = Editor(); f, _ = flow(editor=ed)
+    m = mention(1); del m["followers_count"]; del m["verified_type"]
+    assert f.handle(m) == ("ignored", "missing_fields") and ed.calls == []
+
+
+@pytest.mark.parametrize("cs,answer,result", [
+    (["followed_by"], None, ("mog_me_queued", "1")),               # from the mention expansion, no call
+    (["following"], None, ("ignored", "not_following")),
+    ([], None, ("ignored", "not_following")),
+    ("MISSING", ["followed_by", "following"], ("mog_me_queued", "1")),  # one lookup
+    ("MISSING", [], ("ignored", "not_following")),
+    ("MISSING", RuntimeError("403"), ("ignored", "not_following")),   # lookup error = not following
+    ("MISSING", None, ("ignored", "not_following")),
+])
+def test_follow_gate(cs, answer, result):
+    x, ed = X(), Editor(); x.follow_answer = answer
+    f, store = flow(x=x, editor=ed)
+    m = mention(1)
+    if cs == "MISSING":
+        del m["connection_status"]
+    else:
+        m["connection_status"] = cs
+    assert f.handle(m) == result
+    assert x.follow_lookups == (["111"] if cs == "MISSING" else None)
+    if result[0] == "ignored":
+        assert ed.calls == [] and f.get("1") is None
+    if cs == "MISSING":                                            # the lookup is booked against the budget
+        assert Decimal(store.get(f"x_read_spend:{f.day()}")) == Decimal("0.010")
+
+
+def test_follow_lookup_only_after_free_gates():
+    x = X(); f, _ = flow(x=x)
+    m = mention(1, followers_count=10); del m["connection_status"]
+    assert f.handle(m) == ("ignored", "followers_lt_60")
+    assert x.follow_lookups is None                                # no paid call for an ineligible author
 
 
 def test_get_mogged_tag_added_bottom_corner():
@@ -335,7 +441,7 @@ def test_legacy_autonomous_pfp_bot_refuses_to_listen():
 def test_run_mogme_post_refused_while_killed(monkeypatch, tmp_path, capsys):
     from bot import run
     monkeypatch.setenv("JMI_DB", str(tmp_path / "db.sqlite"))
-    monkeypatch.setenv("JMI_MOG_API_URL", "https://example.invalid/api/mog")
+    monkeypatch.delenv("IMAGE_EDITOR", raising=False)
     monkeypatch.setenv("JMI_MOGME_QUEUE", str(tmp_path / "q"))
     monkeypatch.setenv("JMI_X_BOT_USER_ID", BOT_ID)
     posted = []
@@ -345,3 +451,14 @@ def test_run_mogme_post_refused_while_killed(monkeypatch, tmp_path, capsys):
     assert run.main(["mogme-post"]) == 0                     # fresh store: kill missing = ON
     assert "kill switch is ON" in capsys.readouterr().out
     assert posted == []
+
+
+def test_run_refuses_boot_when_gemini_selected_without_key(monkeypatch, tmp_path, capsys):
+    from bot import run
+    monkeypatch.setenv("JMI_DB", str(tmp_path / "db.sqlite"))
+    monkeypatch.setenv("JMI_MOGME_QUEUE", str(tmp_path / "q"))
+    monkeypatch.setenv("JMI_X_BOT_USER_ID", BOT_ID)
+    monkeypatch.setenv("IMAGE_EDITOR", "gemini")
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    assert run.main(["mogme-list"]) == 2
+    assert "GEMINI_API_KEY missing" in capsys.readouterr().out
