@@ -45,3 +45,7 @@ Thumbs.db
 .vscode/
 *.swp
 .ledger.*
+
+# Bot runtime state
+*.db
+*.db-journal
