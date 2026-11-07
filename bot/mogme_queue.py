@@ -88,11 +88,17 @@ def cost_per_mog(policy):
 
 
 def mogme_budget(policy):
-    """Mog-me's own $/day (owner 2026-11-07: $5.00), separate from the launch-reply budget."""
+    """Mog-me's own $/day (owner 2026-11-07: $5.00), separate from the launch-reply budget.
+    Hard ceiling mog_me.daily_budget_max_usd ($10.00, owner: "if it becomes really popular").
+    The ceiling is never applied automatically: a budget above it refuses boot."""
     try:
-        return _usd(policy.raw["mog_me"]["daily_budget_usd"], "daily_budget_usd")
+        b = _usd(policy.raw["mog_me"]["daily_budget_usd"], "daily_budget_usd")
+        ceiling = _usd(policy.raw["mog_me"]["daily_budget_max_usd"], "daily_budget_max_usd")
     except (KeyError, TypeError):
-        raise MogMeConfigError("mog_me.daily_budget_usd missing") from None
+        raise MogMeConfigError("mog_me.daily_budget_usd / daily_budget_max_usd missing") from None
+    if b > ceiling or ceiling > Decimal("10.00"):
+        raise MogMeConfigError(f"mog-me budget {b} above the owner ceiling {min(ceiling, Decimal('10.00'))}")
+    return b
 
 
 def worst_case_per_mog(policy):
@@ -432,6 +438,7 @@ class MogMeFlow:
         if int(self.s.get(f"mogme_count:{day}", 0)) >= cap:
             return ("ignored", "daily_cap")
         if not self._room(per, day):                     # mog-me's own budget, never the launch replies'
+            self.s.ledger_row("mogme_budget_hit", {"mention_id": mid, "spent": str(self.spent(day))})
             return ("ignored", "budget")
         if not self._follows_bot(m, uid, day):           # last gate: may cost one user read
             return self._silent(mid, uid, "not_following")

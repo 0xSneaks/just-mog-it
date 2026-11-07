@@ -657,3 +657,31 @@ def test_repo_style_refs_load_and_prompt_forbids_copying_text():
     t = mq.REFS_PROMPT
     assert "Do NOT copy any text, letters, words, logos or brand names" in t
     assert "never copy their faces" in t
+
+
+@pytest.mark.parametrize("budget,ceiling,ok", [("5.00", "10.00", True), ("10.00", "10.00", True),
+                                               ("10.01", "10.00", False), ("12.00", "12.00", False),
+                                               ("5.00", None, False)])
+def test_budget_ceiling_ten_dollars(budget, ceiling, ok):
+    cfg = {**load().raw["mog_me"], "daily_budget_usd": budget}
+    if ceiling is None:
+        cfg.pop("daily_budget_max_usd")
+    else:
+        cfg["daily_budget_max_usd"] = ceiling
+    p = load(overrides={"mog_me": cfg})
+    if ok:
+        assert mq.mogme_budget(p) == Decimal(budget)
+    else:
+        with pytest.raises(mq.MogMeConfigError):
+            mq.mogme_budget(p)
+        with pytest.raises(mq.MogMeConfigError):
+            flow(policy_over={"mog_me": cfg})
+
+
+def test_policy_ships_five_with_ten_ceiling_and_logs_budget_hits():
+    raw = load().raw["mog_me"]
+    assert (raw["daily_budget_usd"], raw["daily_budget_max_usd"]) == ("5.00", "10.00")
+    f, store = flow()
+    store.put(f"mogme_spend:{f.day()}", "4.99")
+    assert f.handle(mention(1)) == ("ignored", "budget")
+    assert store.ledger("mogme_budget_hit")

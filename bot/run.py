@@ -127,6 +127,9 @@ def mogme_cmd(cmd, args):
             store.put("mogme_preview_since_id", newest)
         return 0
     if cmd == "mogme-list":
+        hits = sum(1 for r in store.ledger("mogme_budget_hit") if r["ts"] >= time.time() - 86_400)
+        print(f"mog-me spend today ${flow.spent()} of ${p.raw['mog_me']['daily_budget_usd']} "
+              f"(ceiling ${p.raw['mog_me']['daily_budget_max_usd']}); budget hits last 24h: {hits}")
         for it in flow.items(args[0] if args else None):
             print(it["mention_id"], it["status"], it["handle"], it["image_path"], it["reply_text"])
         return 0
