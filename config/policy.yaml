@@ -30,6 +30,7 @@ mog_me:                             # "mog me" X flow (bot/mogme_queue.py): owne
                                     # and mog reply counts. Separate from reply_budget_usd_per_day (launch replies).
   min_changed_fraction: "0.06"      # "no change" check: < 6% of pixels visibly changed = fail + retry (max 2).
                                     # UNVERIFIED threshold; tune on real Gemini output.
+  frame_logo_odds: "0.5"            # owner 2026-11-07: PIT VIPER logo on the frames is random per mog
   tags:                             # each mog gets no tag or one of these at random (equal odds)
     - "GET MOGGED"
     - "MOGGED BY BRAINROT LABS"

@@ -192,6 +192,16 @@ VIPERS_PROMPT = (
     "palette. No text, letters, logos or brand names anywhere on the frames or "
     "lenses. Keep the face, identity, pose, clothing and background otherwise "
     "unchanged. Square 1:1 profile picture.")
+# Owner 2026-11-07: the PIT VIPER logo is random per mog (some have it, some don't).
+VIPERS_LOGO_PROMPT = VIPERS_PROMPT.replace(
+    "No text, letters, logos or brand names anywhere on the frames or lenses.",
+    "Put the PIT VIPER logo lettering small and clean on the side of the frames, and no other "
+    "text anywhere on the frames or lenses.")
+REFS_LOGO_PROMPT = (
+    "The images after this text are owner-approved examples of the target look. Copy only how "
+    "their shades are shaped, fitted to the face and drawn in each picture's own art style. The only "
+    "lettering allowed is the PIT VIPER logo on the frames; never copy any other text, captions or "
+    "logos, and never copy their faces, characters, clothing, jewellery or backgrounds.")
 REFS_PROMPT = (  # verbatim in justmogit-site api/mog.js (REFS_PROMPT)
     "The images after this text are owner-approved examples of the target look. Copy only how their shades are shaped, fitted to the face and drawn in each picture's own art style. Do NOT copy any text, letters, words, logos or brand names from them (ignore any lettering on their frames), and never copy their faces, characters, clothing, jewellery, captions or backgrounds.")
 
@@ -199,6 +209,7 @@ REFS_PROMPT = (  # verbatim in justmogit-site api/mog.js (REFS_PROMPT)
 class StubEditor:
     """No network. Returns one fixed test image. Items it produces can never be posted."""
     name = "stub"
+    last_variant = None
 
     def edit_pfp(self, image_bytes):
         im = Image.new("RGB", (512, 512), (20, 20, 20))
@@ -215,9 +226,10 @@ class GeminiEditor:
     image inline. No retry. A safety block or a response with no image raises EditRefused."""
     name = "gemini"
 
-    def __init__(self, api_key, model=GEMINI_MODEL, post=None, refs=()):
+    def __init__(self, api_key, model=GEMINI_MODEL, post=None, refs=(), logo_odds=0.5, rng=None):
         if not api_key or not str(api_key).strip():
             raise MogMeConfigError("GEMINI_API_KEY missing")
+        self.logo_odds, self._rng, self.last_variant = check_odds(logo_odds), rng or random.SystemRandom(), None
         self._key, self.model = str(api_key).strip(), model
         self._post = post or self._httpx_post
         self.refs = [r for r in refs if _sniff(r)][:MAX_REFS]
@@ -236,9 +248,11 @@ class GeminiEditor:
         if mime is None:
             raise EditRefused("bad_input_image")
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
-        parts = [{"text": VIPERS_PROMPT}, _inline(image_bytes, mime)]
+        logo = self._rng.random() < self.logo_odds        # random PIT VIPER logo per edit
+        self.last_variant = "logo" if logo else "plain"
+        parts = [{"text": VIPERS_LOGO_PROMPT if logo else VIPERS_PROMPT}, _inline(image_bytes, mime)]
         if self.refs:
-            parts += [{"text": REFS_PROMPT}] + [_inline(r, _sniff(r)) for r in self.refs]
+            parts += [{"text": REFS_LOGO_PROMPT if logo else REFS_PROMPT}] + [_inline(r, _sniff(r)) for r in self.refs]
         body = {"contents": [{"parts": parts}]}
         try:
             status, out = self._post(url, json=body, timeout=GEMINI_TIMEOUT_S,
@@ -288,7 +302,17 @@ def load_refs(folder):
     return out
 
 
-def build_editor(env=None):
+def check_odds(v):
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        raise MogMeConfigError("mog_me.frame_logo_odds must be a number 0..1") from None
+    if not 0.0 <= f <= 1.0:
+        raise MogMeConfigError("mog_me.frame_logo_odds must be a number 0..1")
+    return f
+
+
+def build_editor(env=None, logo_odds=0.5):
     """IMAGE_EDITOR=stub (default) | gemini. gemini without GEMINI_API_KEY refuses (fail closed);
     an unknown value refuses. Never falls back silently."""
     env = os.environ if env is None else env
@@ -297,7 +321,7 @@ def build_editor(env=None):
         return StubEditor()
     if kind == "gemini":
         return GeminiEditor(env.get("GEMINI_API_KEY", ""), model=(env.get("GEMINI_IMAGE_MODEL") or GEMINI_MODEL).strip(),
-                            refs=load_refs(env.get("JMI_MOGME_REFS", "mogme_refs")))
+                            refs=load_refs(env.get("JMI_MOGME_REFS", "mogme_refs")), logo_odds=logo_odds)
     raise MogMeConfigError(f"IMAGE_EDITOR must be stub or gemini, got {kind!r}")
 
 
@@ -486,7 +510,8 @@ class MogMeFlow:
             if frac >= self.min_changed:
                 tag = pick_tag(self.tags, self.rng)
                 self._save(mid, uid, handle, add_tag(edited, tag), replies.mog_me_done(handle),
-                           extra={"tries": tries, "changed": fractions, "tag": tag})
+                           extra={"tries": tries, "changed": fractions, "tag": tag,
+                                  "frame_logo": getattr(self.editor, "last_variant", None) == "logo"})
                 return ("mog_me_queued", mid)
         self.s.ledger_row("mogme_no_change", {"mention_id": mid, "author_id": uid, "tries": tries,
                                               "changed": fractions})

@@ -304,7 +304,7 @@ def test_gemini_editor_request_and_refusals_mocked():
 
     def post(url, json, timeout, headers):
         calls.append((url, json, headers)); return post.resp
-    ed = mq.GeminiEditor("fixture-only", post=post)
+    ed = mq.GeminiEditor("fixture-only", post=post, logo_odds=0)
     post.resp = (200, {"candidates": [{"content": {"parts": [
         {"inlineData": {"mimeType": "image/png", "data": base64.b64encode(png()).decode()}}]}}]})
     assert ed.edit_pfp(jpeg())[:8] == b"\x89PNG\r\n\x1a\n"
@@ -506,7 +506,7 @@ def test_gemini_sends_up_to_three_style_refs_after_the_input():
         sent.append(json); return 200, {"candidates": [{"content": {"parts": [
             {"inlineData": {"data": base64.b64encode(png()).decode()}}]}}]}
     refs = [png((64, 64), (i * 40, 0, 0)) for i in range(5)] + [b"not an image"]
-    ed = mq.GeminiEditor("fixture-only", post=post, refs=refs)
+    ed = mq.GeminiEditor("fixture-only", post=post, refs=refs, logo_odds=0)
     ed.edit_pfp(jpeg())
     parts = sent[0]["contents"][0]["parts"]
     assert parts[0]["text"] == mq.VIPERS_PROMPT and parts[1]["inline_data"]["mime_type"] == "image/jpeg"
@@ -685,3 +685,39 @@ def test_policy_ships_five_with_ten_ceiling_and_logs_budget_hits():
     store.put(f"mogme_spend:{f.day()}", "4.99")
     assert f.handle(mention(1)) == ("ignored", "budget")
     assert store.ledger("mogme_budget_hit")
+
+
+def test_frame_logo_is_random_per_edit_and_recorded():
+    import base64, random
+    sent = []
+
+    def post(url, json, timeout, headers):
+        sent.append(json["contents"][0]["parts"]); return 200, {"candidates": [{"content": {"parts": [
+            {"inlineData": {"data": base64.b64encode(png((512, 512), (250, 250, 250))).decode()}}]}}]}
+    refs = [png((64, 64))]
+    for odds, want in ((0, mq.VIPERS_PROMPT), (1, mq.VIPERS_LOGO_PROMPT)):
+        ed = mq.GeminiEditor("fixture-only", post=post, refs=refs, logo_odds=odds)
+        ed.edit_pfp(jpeg())
+        assert sent[-1][0]["text"] == want
+        assert sent[-1][2]["text"] == (mq.REFS_LOGO_PROMPT if odds else mq.REFS_PROMPT)
+    assert "PIT VIPER logo" in mq.VIPERS_LOGO_PROMPT and "No text" not in mq.VIPERS_LOGO_PROMPT
+    ed = mq.GeminiEditor("fixture-only", post=post, logo_odds=0.5, rng=random.Random(7))
+    seen = set()
+    for _ in range(30):
+        ed.edit_pfp(jpeg()); seen.add(ed.last_variant)
+    assert seen == {"logo", "plain"}
+    store = Store(clock=Clock()); store.put("kill", True)
+    ed1 = mq.GeminiEditor("fixture-only", post=post, logo_odds=1)
+    f = mq.MogMeFlow(store, load(), X(), ed1, tempfile.mkdtemp(), fetch=Fetch(), clock=Clock())
+    f.handle(mention(1))
+    assert f.get("1")["frame_logo"] is True
+
+
+@pytest.mark.parametrize("odds", ["-0.1", "1.5", "lots", None])
+def test_bad_logo_odds_refuse_boot(odds):
+    with pytest.raises(mq.MogMeConfigError):
+        mq.build_editor({"IMAGE_EDITOR": "gemini", "GEMINI_API_KEY": "fixture-only"}, logo_odds=odds)
+
+
+def test_policy_logo_odds_half():
+    assert mq.check_odds(load().raw["mog_me"]["frame_logo_odds"]) == 0.5
