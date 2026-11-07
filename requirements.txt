@@ -1,0 +1,6 @@
+google-genai==1.56.0
+pydantic==2.12.5
+Pillow==12.2.0
+tweepy==4.16.0
+requests==2.33.1
+pytest==8.4.2
