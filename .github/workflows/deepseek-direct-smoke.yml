@@ -1,7 +1,7 @@
 name: JustMogIt direct DeepSeek smoke
 on:
   pull_request:
-    types: [opened]
+    types: [opened, synchronize]
     branches: [codex/deepseek-pair-preview]
 permissions:
   contents: read
@@ -32,6 +32,7 @@ jobs:
           import json
           import os
           import runpy
+          import time
           from dataclasses import asdict, replace
           from unittest.mock import Mock
           
