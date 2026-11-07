@@ -286,21 +286,13 @@ class TestMogMe(unittest.TestCase):
         e, s, x, _ = make()
         self.assertEqual(e.ingest(mention(1, text="@justmogit_bot mog me")), ("ignored", "mog_me_disabled"))
 
-    def test_enabled_flow_and_limit(self):
-        class Faces:
-            def eyes(self, b): return ((170, 190), (230, 190))
-        e, s, x, _ = make(policy_over={"mog_me_enabled": True}, faces=Faces())
-        self.assertEqual(e.ingest(mention(1, text="@justmogit_bot mog me")), ("mog_me_done", "m1"))
-        self.assertEqual(x.replies[-1][2], ["m1"])
-        self.assertIn("wraparound", x.media[0][1])
-        self.assertEqual(e.ingest(mention(2, text="@justmogit_bot mog me")), ("ignored", "rate_limited"))
-
-    def test_no_face(self):
-        class Faces:
-            def eyes(self, b): return None
-        e, s, x, _ = make(policy_over={"mog_me_enabled": True}, faces=Faces())
-        self.assertEqual(e.ingest(mention(1, text="@justmogit_bot mog me")), ("mog_me_failed", "no_face"))
-        self.assertEqual(x.media, [])
+    def test_enabled_never_posts_directly(self):
+        # "mog me" goes to the owner approval queue (bot/mogme_queue.py, tests/test_mogme_queue.py);
+        # the engine itself never uploads or replies for it.
+        e, s, x, _ = make(policy_over={"mog_me_enabled": True})
+        e.set_kill(False)
+        self.assertEqual(e.ingest(mention(1, text="@justmogit_bot mog me")), ("ignored", "mog_me_unwired"))
+        self.assertEqual((x.replies, x.media), ([], []))
 
 if __name__ == "__main__":
     unittest.main()

@@ -17,6 +17,8 @@ from .pfp import render_pfp
 
 SINCE_ID_PATH = Path("tmp/since_id.txt")
 POLL_INTERVAL_SECONDS = 60
+AUTONOMOUS_POSTING_DISABLED = ("mogit.bot autonomous posting is disabled: every reply needs per-item owner "
+                               "approval. Use the approval queue: python3 -m bot.run mogme-preview")
 LOGGER = logging.getLogger(__name__)
 
 
@@ -91,6 +93,10 @@ class MogBot:
             )
 
     def listen(self) -> None:
+        # Owner gate (2026-11-07): no autonomous X posting. X written approval for AI replies and
+        # owner go-live are not granted, so every reply needs per-item owner approval. "mog me"
+        # runs through the approval queue instead: python3 -m bot.run mogme-preview / mogme-approve.
+        raise SystemExit(AUTONOMOUS_POSTING_DISABLED)
         os.makedirs("tmp", exist_ok=True)
         try:
             stored_id = SINCE_ID_PATH.read_text().strip()

@@ -21,6 +21,13 @@ claim_threshold_sol: "0.02"         # 0.13
 bankroll_seed_sol: "5"              # 0.14
 priority_fee_cap_sol: "0.005"       # 0.15
 mog_me_enabled: false               # 0.16 off until X media-upload 403 is fixed
+mog_me:                             # "mog me" X flow (bot/mogme_queue.py): owner approval queue
+  autopost: false                   # posting WITHOUT per-item approval; also needs kill switch OFF. Owner only.
+  style: "vipers"                   # justmogit-site /api/mog style (prompt lives in api/mog.js only)
+  costs_usd:                        # worst case per mog; daily cap = floor(reply_budget / sum incl. plain_post)
+    gemini_image: "0.039"           # UNVERIFIED: gemini-2.5-flash-image list price, 1290 output tokens x $30/1M
+    mention_read: "0.005"           # UNVERIFIED: X pay-per-use post read (BUILD-SPEC-v2 §3)
+    user_read: "0.010"              # UNVERIFIED: X pay-per-use user read (BUILD-SPEC-v2 §3)
 
 venue: pump.fun                     # owner 2026-11-04: pump.fun only
 

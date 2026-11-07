@@ -32,7 +32,7 @@ class Refused(Exception):
 PUMP_VENUE = "pump.fun"  # the only venue Engine._prepare builds for (bot/live/pumpportal.py)
 
 class Engine:
-    def __init__(self, store, policy, adapters, clock=time.time, public=False, *, pair_preview=None):
+    def __init__(self, store, policy, adapters, clock=time.time, public=False, *, pair_preview=None, mogme=None):
         if public and pair_preview is not None:
             raise BootRefused("pair review is preview-only")
         self.s, self.p, self.a, self.clock = store, policy, adapters, clock
@@ -40,6 +40,7 @@ class Engine:
         self.cap = fees.lamports(policy.cost_cap_sol)
         self.public = public
         self.pair_preview = pair_preview
+        self.mogme = mogme          # bot.mogme_queue.MogMeFlow: "mog me" goes to the owner approval queue
 
     # ---------------------------------------------------------------- boot / kill
     def boot(self):
@@ -519,27 +520,13 @@ class Engine:
 
     # ---------------------------------------------------------------- mog me
     def mog_me(self, m):
-        from . import mogme
+        """'mog me' never posts from here: it renders a preview into the owner approval queue
+        (bot/mogme_queue.py). Posting happens only in MogMeFlow.post_ready (approved + kill OFF)."""
         if not self.p.mog_me_enabled:
             return ("ignored", "mog_me_disabled")
-        if self.killed():
-            return ("ignored", "kill")
         uid = str(m["author_id"])
         if self.p.trigger_policy == "allowlist" and uid not in [str(x) for x in self.p.allowlist]:
             return ("ignored", "not_allowlisted")
-        key = f"mogme:{self.day()}:{uid}"
-        if self.s.get(key, 0) >= int(self.p.limits["mog_me_per_user_per_day"]):
-            return ("ignored", "rate_limited")
-        self.s.put(key, self.s.get(key, 0) + 1)
-        pfp = self.a.x.profile_image(uid)                  # bytes of the 400x400 pfp
-        eyes = self.a.faces.eyes(pfp)                       # None or ((lx,ly),(rx,ry)) in px
-        if not self.budget.try_spend(url=False):
-            return ("ignored", "budget")
-        if not eyes:
-            self.a.x.reply(m["id"], replies.mog_me_failed(), idempotency_key=f"mogme:{m['id']}")
-            return ("mog_me_failed", "no_face")
-        png = mogme.render(pfp, eyes)
-        media_id = self.a.x.upload_media(png, alt_text=replies.alt_text(m.get("handle", "you")))
-        self.a.x.reply(m["id"], replies.mog_me_done(m.get("handle", "you")), media_ids=[media_id],
-                       idempotency_key=f"mogme:{m['id']}")
-        return ("mog_me_done", media_id)
+        if self.mogme is None:
+            return ("ignored", "mog_me_unwired")
+        return self.mogme.handle(m)

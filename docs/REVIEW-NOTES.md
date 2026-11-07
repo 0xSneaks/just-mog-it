@@ -33,6 +33,17 @@ Open question: legacy ledger entries without `ts` count as today, so a real ledg
 | `bot/callout.py` | `wallet_mint_balance`, `CalloutFlow.post` | Reads the posting wallet's balance of the mint over SPL Token and Token-2022. A balance above 0 or any read error means REFUSED and no POST | Read-only RPC. No keys. The default adapters are unwired and raise, so the flow refuses. |
 | `bot/metadata.py` | `RETIRED_DESC`, `build_description` | Strips "not the original dev" and standalone "NFA" from copied target descriptions | This is metadata text only. |
 
+## "mog me" X flow (pass 3, not a money path)
+
+| File | Change |
+|---|---|
+| `bot/mogme_queue.py` | New. Intake filters (retweet, own post, dedupe), 24 h author cooldown, daily cap from prices (fail closed if a price is missing), shared $/day budget, author-only avatar, hardened fetch, `SiteMogEditor` (no retry), GET MOGGED tag, file queue, `post_ready`. `post_ready` posts only when the kill switch is exactly `False` and the item is APPROVED (or autopost is exactly `True`), and marks the item POSTING before any X call. |
+| `bot/engine.py` | `mog_me` no longer renders, uploads or replies. It delegates to the queue (`mogme=` kwarg). With no queue wired it returns `mog_me_unwired`. |
+| `bot/live/x.py` | `mentions()` adds `is_retweet` and the author's `profile_image_url`; new `profile_image_url(uid)`. |
+| `bot/run.py` | New `mogme-preview`, `mogme-list`, `mogme-approve`, `mogme-reject` and `mogme-post` commands. `loop` wires the queue when `JMI_MOG_API_URL` is set. |
+| `mogit/bot.py` | `listen()` raises SystemExit. It used to reply on X with no approval, kill switch or budget. |
+| `config/policy.yaml`, `bot/policy.py` | New required `mog_me` block: `autopost: false`, `style`, and UNVERIFIED prices. |
+
 ## Not built (blocked)
 
 Mogz create adapter: CANCELLED (owner ruling 2026-11-07, mogz is out). No venue adapter until the pump.fun-or-Float decision.

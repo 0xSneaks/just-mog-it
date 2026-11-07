@@ -8,6 +8,7 @@ There are two separate paths in this repo. Neither has launched a coin. Launch #
 | `bot/` | **X engine** (mentions → gates → dossier → reservation → fire → reply) plus the **pump.fun pipeline** (PumpPortal create, pump guard). | Logic BUILT offline with fake adapters. The pump.fun pipeline is SPECCED and has never launched. |
 
 DeepSeek pair evaluator (`bot/live/deepseek.py`, `deepseek-flash`) is connected and working. See Actions run 42407864926 (success/PASS) and `docs/DEEPSEEK-TIMEOUT.md`.
+**"mog me" on X** (`bot/mogme_queue.py`): the mention author's own PFP, edited by the shared Gemini endpoint (justmogit-site `api/mog.js`, branch `pfp-changer`; the prompt lives there only), plus a small GET MOGGED tag. The default is PREVIEW: items go to an approval queue on disk. `mogme-post` posts only APPROVED items, and only with the kill switch OFF. `mog_me.autopost` stays false. Limits: 1 per author per rolling 24 h, and a daily cap of floor($0.30 / $0.069) = 4, shared with the reply budget. The legacy `mogit/bot.py` listener refuses to start, because it posted without approval.
 `bot/callout.py` (mogz.fun callouts) is parked with mogz. Do not extend it unless a venue decision revives mogz callouts.
 
 Run: `pip install -r requirements.txt && python3 -m pytest -q`
