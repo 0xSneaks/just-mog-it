@@ -1,0 +1,58 @@
+# JustMogIt X bot — owner policy (BUILD-SPEC-v2 §0 + owner brief 2026-11-07).
+# Flip values HERE only. Code never hardcodes these. Missing key = boot refuses.
+
+# §0 defaults (ADOPTED by Sneaks 2026-11-06)
+launches_per_day: 3                 # 0.1
+cost_cap_sol: "0.025"               # 0.2  creation 0.020 + priority buffer 0.005
+launch_fee_sol: "0.02"              # 0.3  paid by requester before RESERVED
+fee_split:                          # 0.4  Split A
+  mogger: 25
+  holders: 25
+  bankroll: 50
+trigger_policy: allowlist           # 0.5  allowlist | open
+pair_quote: SOL                     # 0.6  SOL only
+dev_buy_sol: "0"                    # 0.7  bot never buys its own launches
+reply_budget_usd_per_day: "0.30"    # 0.8
+kill_switch_on_at_boot: true        # 0.9
+owner_approval_per_item: true       # 0.10 until ledger is live
+x_reply_approval_ref: ""            # 0.11 X's written approval reference; EMPTY = public boot refused
+image_fallback: pit_viper_template  # 0.12
+claim_threshold_sol: "0.02"         # 0.13
+bankroll_seed_sol: "5"              # 0.14
+priority_fee_cap_sol: "0.005"       # 0.15
+mog_me_enabled: false               # 0.16 off until X media-upload 403 is fixed
+
+venue: pump.fun                     # owner 2026-11-04: pump.fun only
+
+# Pilot allowlist (X user ids as strings). Empty = nobody can trigger.
+allowlist: []
+
+# Owner brief 2026-11-07 — PROPOSED thresholds, owner to confirm
+rug:
+  rule: strict                      # strict: (lp_pulled OR dev_dump) AND price_drop | any: any one signal
+  dev_sold_pct_of_holdings: 50
+  price_drop_pct: 70
+  price_window_min: 60
+wrong_pair:
+  min_pair_liquidity_sol: "0.5"     # ASSUMPTION — "effectively zero" needs an owner number
+
+description_prefix: "Rescue mog of ${ticker} — original CA {ca}. Not the original dev. NFA."
+description_max_chars: 1000         # ASSUMPTION — set to pump.fun's real limit before go-live
+
+mogger:
+  min_payout_sol: "0.01"            # ASSUMPTION — brief says a minimum applies; number not set
+tiers:                              # owner rule set 2026-11-04; numbers are design placeholders
+  - {min_pct_supply: "0",   multiplier: "1.0"}
+  - {min_pct_supply: "0.5", multiplier: "1.25"}
+  - {min_pct_supply: "1.0", multiplier: "1.5"}
+
+limits:
+  cooldown_per_user_min: 60
+  mog_me_per_user_per_day: 1
+  job_ttl_hours: 6
+  reservation_ttl_min: 10
+  spelling_ttl_min: 30
+
+x_prices_usd:
+  plain_post: "0.015"
+  url_post: "0.200"
