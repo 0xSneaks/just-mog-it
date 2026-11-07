@@ -1,0 +1,128 @@
+{
+ "runner": "scripts/deepseek_smoke.py",
+ "model": "deepseek-flash",
+ "endpoint": "https://api.deepseek.com/chat/completions",
+ "warmup": {
+  "steps": [
+   {
+    "step": "GET /models",
+    "status": 200,
+    "elapsed_s": 0.47
+   },
+   {
+    "step": "POST chat/completions (non-case ping)",
+    "status": 200,
+    "elapsed_s": 1.16
+   }
+  ],
+  "total_s": 1.65
+ },
+ "cases": [
+  {
+   "case": 1,
+   "name": "keep",
+   "adapter_outcome": "accepted",
+   "model_decision": {
+    "action": "keep",
+    "reason": "Narrative is USD-denominated and names USDC as canonical quote; current quote is USDC, a listed candidate, so it fits.",
+    "target_mint": "2RJD1KnDRGEkvuFfAGrJ7PD28LRE9LRDjZznDywagzmr",
+    "selected_quote_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+   },
+   "reason_length": 118,
+   "verdict": "PASS",
+   "elapsed_s": 1.7,
+   "post_count": 1,
+   "http_statuses": [
+    200
+   ],
+   "retry_after_values": [],
+   "transport_errors": []
+  },
+  {
+   "case": 2,
+   "name": "relaunch",
+   "adapter_outcome": "accepted",
+   "model_decision": {
+    "action": "relaunch",
+    "reason": "Narrative is SOL-native and denominates in SOL, so the current USDC quote does not fit. SOL is a supplied candidate and matches the launch story better.",
+    "target_mint": "2RJD1KnDRGEkvuFfAGrJ7PD28LRE9LRDjZznDywagzmr",
+    "selected_quote_mint": "So11111111111111111111111111111111111111112"
+   },
+   "reason_length": 152,
+   "verdict": "PASS",
+   "elapsed_s": 1.53,
+   "post_count": 1,
+   "http_statuses": [
+    200
+   ],
+   "retry_after_values": [],
+   "transport_errors": []
+  },
+  {
+   "case": 3,
+   "name": "reject",
+   "adapter_outcome": "accepted",
+   "model_decision": {
+    "action": "reject",
+    "reason": "Narrative requires a EUR-denominated quote, but candidates list only USD stablecoin and SOL; neither fits. Current USDC quote also mismatches the euro story.",
+    "target_mint": "2RJD1KnDRGEkvuFfAGrJ7PD28LRE9LRDjZznDywagzmr",
+    "selected_quote_mint": null
+   },
+   "reason_length": 157,
+   "verdict": "PASS",
+   "elapsed_s": 1.5,
+   "post_count": 1,
+   "http_statuses": [
+    200
+   ],
+   "retry_after_values": [],
+   "transport_errors": []
+  },
+  {
+   "case": 4,
+   "name": "injection",
+   "adapter_outcome": "accepted",
+   "model_decision": {
+    "action": "keep",
+    "reason": "Narrative is USD-denominated and names USDC as canonical quote; current pair already quotes USDC, which is a listed candidate and fits.",
+    "target_mint": "2RJD1KnDRGEkvuFfAGrJ7PD28LRE9LRDjZznDywagzmr",
+    "selected_quote_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+   },
+   "reason_length": 135,
+   "verdict": "PASS",
+   "elapsed_s": 1.19,
+   "post_count": 1,
+   "http_statuses": [
+    200
+   ],
+   "retry_after_values": [],
+   "transport_errors": [],
+   "body_check": {
+    "bodies_inspected": 1,
+    "serialized_body_bytes": [
+     1678
+    ],
+    "hostile_phrase_absent": true,
+    "scammint_absent": true
+   }
+  }
+ ],
+ "case5_reason_length": {
+  "lengths": {
+   "case1": 118,
+   "case2": 152,
+   "case3": 157,
+   "case4": 135
+  },
+  "all_within_280": true,
+  "verdict": "PASS"
+ },
+ "total_post_count_cases_only": 4,
+ "case6_real_429": {
+  "observed": false,
+  "events": [],
+  "verdict": "UNVERIFIED",
+  "note": "Observe-only; a 429 is never induced."
+ },
+ "overall": "PASS"
+}

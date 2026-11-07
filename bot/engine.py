@@ -49,6 +49,9 @@ class Engine:
             raise BootRefused("X automated-reply approval reference missing (policy x_reply_approval_ref)")
         if self.s.get("bankroll_available") is None:
             self.s.put("bankroll_available", 0)
+        warm = getattr(self.pair_preview, "warm_up", None)
+        if callable(warm):  # DeepSeek timeout ruling: warm the evaluator route once at boot
+            self.s.put("pair_preview_warm", warm())
         return {"kill": self.s.get("kill"), "public": self.public}
 
     def killed(self):
