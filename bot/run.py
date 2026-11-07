@@ -8,7 +8,10 @@
   python3 -m bot.run bankroll SOL         set spendable bankroll (capped at the wallet's real balance)
   python3 -m bot.run mogme-preview        read mentions once, render "mog me" previews into the queue (posts nothing)
   python3 -m bot.run mogme-list [STATUS]  show the "mog me" approval queue
-  python3 -m bot.run mogme-approve ID NAME / mogme-reject ID NAME   owner decision on one item
+  python3 -m bot.run mogme-approve ID NAME REASON...   owner yes, with a short reason
+  python3 -m bot.run mogme-reject ID NAME REASON...    wrong size / off the eyes / wrong angle /
+                                          style mismatch / flat overlay / other[: note]
+  python3 -m bot.run mogme-ref ID         copy an APPROVED gemini mog into the style-reference folder
   python3 -m bot.run mogme-post           post APPROVED items (refused while the kill switch is ON)
 
 --dry-run: reads X and Solana, posts nothing (replies printed), no vault → nothing can sign.
@@ -17,7 +20,8 @@ Live mode refuses to boot without policy x_reply_approval_ref (X's written appro
 Env (names only, values never in the repo): JMI_DB, JMI_BOT_WALLET, JMI_FEE_ADDRESS,
 JMI_X_BOT_USER_ID, JMI_X_USER_TOKEN, JMI_RPC_URLS, JMI_DAS_URL, JMI_PINATA_JWT,
 JMI_GEMINI_KEY, JMI_GEMINI_MODEL, JMI_VAULT_URL, JMI_VAULT_TOKEN,
-IMAGE_EDITOR (stub|gemini, default stub), GEMINI_API_KEY (gemini only), JMI_MOGME_QUEUE"""
+IMAGE_EDITOR (stub|gemini, default stub), GEMINI_API_KEY (gemini only), JMI_MOGME_QUEUE,
+JMI_MOGME_REFS (style references, default mogme_refs)"""
 import os
 import sys
 import time
@@ -128,9 +132,11 @@ def mogme_cmd(cmd, args):
         return 0
     try:
         if cmd == "mogme-approve":
-            print(flow.approve(args[0], args[1])["status"]); return 0
+            print(flow.approve(args[0], args[1], " ".join(args[2:]))["status"]); return 0
         if cmd == "mogme-reject":
-            print(flow.reject(args[0], args[1])["status"]); return 0
+            print(flow.reject(args[0], args[1], " ".join(args[2:]))["status"]); return 0
+        if cmd == "mogme-ref":
+            print(flow.add_ref(args[0], os.environ.get("JMI_MOGME_REFS", "mogme_refs"))); return 0
     except (IndexError, MogMeError) as err:
         print("refused:", err); return 2
     if cmd == "mogme-post":

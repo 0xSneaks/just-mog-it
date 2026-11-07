@@ -4,13 +4,15 @@ the kill switch is OFF; both are off by default).
 
 Pipeline (per mention): skip retweets / own posts / duplicates → eligibility (>= 60 followers AND a
 checkmark AND follows @justmogit_bot; silent skip otherwise) → 1 per author per rolling 24h
-→ daily cap + shared $/day reply budget → target = the mention AUTHOR's avatar only (never
+→ mog-me daily budget ($5.00, separate from the launch-reply budget) → target = the mention AUTHOR's avatar only (never
 another tagged user, never an attached image) → hardened fetch (https, pbs.twimg.com only,
 no redirects, 10 s, 5 MB, jpeg/png/webp by header AND magic bytes) → edit_pfp() via IMAGE_EDITOR=stub|gemini
-(default stub; gemini needs GEMINI_API_KEY or boot is refused) → small
-"GET MOGGED" tag bottom-right → queue item PENDING (PNG + JSON on disk).
-A refused/failed edit is logged and nothing is queued or retried. A default avatar or a failed
-fetch queues a polite text-only draft (still needs approval to post)."""
+(default stub; gemini needs GEMINI_API_KEY or boot is refused; avatars under 512 px are upscaled
+first; owner-approved style references ride along) → "no change" check, max 2 retries, every
+try billed to the budget → optional random tag in the bottom corner → queue item PENDING.
+A safety refusal is logged and never retried. A default avatar, a failed fetch, or 3 tries
+with no visible change queue a polite text-only draft (still needs approval to post)."""
+import random
 import base64
 import binascii
 import hashlib
@@ -34,9 +36,14 @@ MAX_AVATAR_BYTES = 5 * 1024 * 1024
 AVATAR_MIME = ("image/jpeg", "image/png", "image/webp")
 COOLDOWN_S = 24 * 3600
 EDIT_TIMEOUT_S = 60
-TAG = "GET MOGGED"
+MIN_SIDE = 512                      # avatars smaller than this are upscaled before the edit
+UPSCALE_SIDE = 1024
+MAX_EDIT_TRIES = 3                  # first try + max 2 retries on "no change"
+MAX_REFS = 3
+REJECT_REASONS = ("wrong size", "off the eyes", "wrong angle", "style mismatch", "flat overlay", "other")
 PENDING, APPROVED, REJECTED, POSTING, POSTED = "PENDING", "APPROVED", "REJECTED", "POSTING", "POSTED"
 POLITE_SKIP = "Couldn't grab your profile pic this time. Set one and tag me again for a mog."
+POLITE_NO_CHANGE = "Your pic fought the shades and won this round. Tag me again later for a mog."
 
 
 class MogMeError(Exception):
@@ -80,10 +87,24 @@ def cost_per_mog(policy):
     return sum(parts, Decimal("0"))
 
 
+def mogme_budget(policy):
+    """Mog-me's own $/day (owner 2026-11-07: $5.00), separate from the launch-reply budget."""
+    try:
+        return _usd(policy.raw["mog_me"]["daily_budget_usd"], "daily_budget_usd")
+    except (KeyError, TypeError):
+        raise MogMeConfigError("mog_me.daily_budget_usd missing") from None
+
+
+def worst_case_per_mog(policy):
+    """Every try is billed: up to MAX_EDIT_TRIES Gemini calls per mog."""
+    g = _usd(policy.raw["mog_me"]["costs_usd"]["gemini_image"], "gemini_image")
+    return cost_per_mog(policy) + g * (MAX_EDIT_TRIES - 1)
+
+
 def daily_cap(policy):
+    """Mogs per day if every one lands on the first try. Spend is still checked before each try."""
     per = cost_per_mog(policy)
-    budget = _usd(policy.raw["reply_budget_usd_per_day"], "reply_budget_usd_per_day")
-    return int(budget // per) if per > 0 else 0
+    return int(mogme_budget(policy) // per) if per > 0 else 0
 
 
 # ------------------------------------------------------------------ avatar fetch
@@ -153,14 +174,21 @@ VERIFIED_TYPES = frozenset({"blue", "business", "government"})
 MIN_FOLLOWERS = 60
 GEMINI_MODEL = "gemini-2.5-flash-image"
 GEMINI_TIMEOUT_S = 55
-# Verbatim copy of PROMPTS.vipers in justmogit-site api/mog.js (branch pfp-changer @ cc65e34).
-# Keep the two in sync: the site endpoint is the reference.
+# Verbatim copy of PROMPTS.vipers in justmogit-site api/mog.js (branch pfp-changer @ 771a800,
+# shades ruling 2026-11-07). Keep the two in sync: the site endpoint is the reference.
 VIPERS_PROMPT = (
-    "Edit this profile photo: put oversized rainbow-gradient Pit Viper shield "
-    "sunglasses on the person's face, perfectly fitted and realistic. Add subtle "
-    "neon pink and cyan glitch streaks around the edges of the frame. Keep the "
-    "person's face, pose, clothing and background otherwise unchanged and "
-    "photorealistic. Square 1:1 profile picture, face centered.")
+    "Edit this profile picture: add wraparound shield sport sunglasses to the "
+    "face. Draw the sunglasses in exactly the same art style as the input image "
+    "(a photo stays a photo, a cartoon stays a cartoon, pixel art stays pixel "
+    "art, 3D stays 3D). Fit them to the face: sized to the head, centered on the "
+    "eyes, following the head's angle and tilt, with the arms going back behind "
+    "the ears or hair. Take the frame and lens colours from the picture's own "
+    "palette. No text, letters, logos or brand names anywhere on the frames or "
+    "lenses. Keep the face, identity, pose, clothing and background otherwise "
+    "unchanged. Square 1:1 profile picture.")
+REFS_PROMPT = ("The images after this text are owner-approved examples of the target look. Match "
+               "how their shades are styled and fitted. Never copy their faces, people, text or "
+               "backgrounds into the result.")
 
 
 class StubEditor:
@@ -182,11 +210,12 @@ class GeminiEditor:
     image inline. No retry. A safety block or a response with no image raises EditRefused."""
     name = "gemini"
 
-    def __init__(self, api_key, model=GEMINI_MODEL, post=None):
+    def __init__(self, api_key, model=GEMINI_MODEL, post=None, refs=()):
         if not api_key or not str(api_key).strip():
             raise MogMeConfigError("GEMINI_API_KEY missing")
         self._key, self.model = str(api_key).strip(), model
         self._post = post or self._httpx_post
+        self.refs = [r for r in refs if _sniff(r)][:MAX_REFS]
 
     @staticmethod
     def _httpx_post(url, json, timeout, headers):
@@ -202,9 +231,10 @@ class GeminiEditor:
         if mime is None:
             raise EditRefused("bad_input_image")
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
-        body = {"contents": [{"parts": [{"text": VIPERS_PROMPT},
-                                        {"inline_data": {"mime_type": mime,
-                                                         "data": base64.b64encode(image_bytes).decode()}}]}]}
+        parts = [{"text": VIPERS_PROMPT}, _inline(image_bytes, mime)]
+        if self.refs:
+            parts += [{"text": REFS_PROMPT}] + [_inline(r, _sniff(r)) for r in self.refs]
+        body = {"contents": [{"parts": parts}]}
         try:
             status, out = self._post(url, json=body, timeout=GEMINI_TIMEOUT_S,
                                      headers={"Content-Type": "application/json", "x-goog-api-key": self._key})
@@ -233,6 +263,26 @@ class GeminiEditor:
         raise EditRefused("no_image_returned")
 
 
+def _inline(data, mime):
+    return {"inline_data": {"mime_type": mime, "data": base64.b64encode(data).decode()}}
+
+
+def load_refs(folder):
+    """Up to MAX_REFS owner-approved reference mogs (png/jpeg/webp, <= 5 MB), newest first."""
+    if not folder or not Path(folder).is_dir():
+        return []
+    files = sorted((p for p in Path(folder).iterdir() if p.is_file()), key=lambda p: p.stat().st_mtime, reverse=True)
+    out = []
+    for p in files:
+        if p.stat().st_size <= MAX_AVATAR_BYTES:
+            b = p.read_bytes()
+            if _sniff(b):
+                out.append(b)
+        if len(out) == MAX_REFS:
+            break
+    return out
+
+
 def build_editor(env=None):
     """IMAGE_EDITOR=stub (default) | gemini. gemini without GEMINI_API_KEY refuses (fail closed);
     an unknown value refuses. Never falls back silently."""
@@ -241,31 +291,76 @@ def build_editor(env=None):
     if kind == "stub":
         return StubEditor()
     if kind == "gemini":
-        return GeminiEditor(env.get("GEMINI_API_KEY", ""), model=(env.get("GEMINI_IMAGE_MODEL") or GEMINI_MODEL).strip())
+        return GeminiEditor(env.get("GEMINI_API_KEY", ""), model=(env.get("GEMINI_IMAGE_MODEL") or GEMINI_MODEL).strip(),
+                            refs=load_refs(env.get("JMI_MOGME_REFS", "mogme_refs")))
     raise MogMeConfigError(f"IMAGE_EDITOR must be stub or gemini, got {kind!r}")
 
 
-def add_tag(data):
-    """Small 'GET MOGGED' tag in the bottom-right corner. Everything else untouched."""
+_TAG_OK = re.compile(r"[A-Z0-9][A-Z0-9 !'.-]{0,31}")
+_TAG_BAD = re.compile(r"https?|www|\.(com|fun|io|xyz|net|org|app|it)\b|\$|%|\b\d+(\.\d+)?\s*(sol|usd|x)\b"
+                      r"|pit ?viper|oakley|ray-?ban|nike|adidas", re.I)
+
+
+def validate_tags(tags):
+    """Owner tag lines: short caps text only. No URLs, prices, tickers or brands (fail closed)."""
+    if not isinstance(tags, list):
+        raise MogMeConfigError("mog_me.tags must be a list")
+    for t in tags:
+        if not isinstance(t, str) or not _TAG_OK.fullmatch(t) or _TAG_BAD.search(t):
+            raise MogMeConfigError(f"tag not allowed: {t!r}")
+    return list(tags)
+
+
+def pick_tag(tags, rng):
+    """No tag, or one line from the list, chosen at random with equal odds."""
+    return rng.choice([None] + list(tags))
+
+
+def add_tag(data, text):
+    """Small tag in the bottom-right corner (at most ~6% of the height, kept off the centered
+    face). text=None returns the image unchanged."""
+    if not text:
+        return data
     with Image.open(io.BytesIO(data)) as im:
         canvas = im.convert("RGBA")
     w, h = canvas.size
-    size = max(10, w // 24)
+    size = max(10, min(w // 28, h // 24))
     try:
         font = ImageFont.load_default(size=size)
     except TypeError:                                    # Pillow < 10.1
         font = ImageFont.load_default()
     d = ImageDraw.Draw(canvas)
-    l, t, r, b = d.textbbox((0, 0), TAG, font=font)
+    l, t, r, b = d.textbbox((0, 0), text, font=font)
     pad = max(4, size // 3)
     bw, bh = (r - l) + 2 * pad, (b - t) + 2 * pad
     x0, y0 = w - bw - pad, h - bh - pad
     d.rounded_rectangle((x0, y0, w - pad, h - pad), radius=pad, fill=(10, 10, 10, 230),
                         outline=(255, 46, 147, 255), width=max(1, size // 10))
-    d.text((x0 + pad - l, y0 + pad - t), TAG, font=font, fill=(0, 255, 230, 255))
+    d.text((x0 + pad - l, y0 + pad - t), text, font=font, fill=(0, 255, 230, 255))
     out = io.BytesIO()
     canvas.convert("RGB").save(out, "PNG")
     return out.getvalue()
+
+
+def upscale(data):
+    """Avatars under MIN_SIDE px are upscaled (LANCZOS) so the shorter side is UPSCALE_SIDE,
+    re-encoded as PNG. Larger images pass through untouched."""
+    with Image.open(io.BytesIO(data)) as im:
+        w, h = im.size
+        if min(w, h) >= MIN_SIDE:
+            return data
+        k = UPSCALE_SIDE / min(w, h)
+        big = im.convert("RGB").resize((round(w * k), round(h * k)), Image.Resampling.LANCZOS)
+    out = io.BytesIO(); big.save(out, "PNG"); return out.getvalue()
+
+
+def changed_fraction(before, after, side=256, threshold=24):
+    """Share of pixels that visibly changed (grayscale, both resized to side x side)."""
+    with Image.open(io.BytesIO(before)) as a, Image.open(io.BytesIO(after)) as b:
+        ga = a.convert("L").resize((side, side), Image.Resampling.BILINEAR)
+        gb = b.convert("L").resize((side, side), Image.Resampling.BILINEAR)
+    pa, pb = ga.tobytes(), gb.tobytes()
+    return sum(1 for x, y in zip(pa, pb) if abs(x - y) > threshold) / float(side * side)
 
 
 def ineligible(m):
@@ -283,11 +378,28 @@ def ineligible(m):
 
 # ------------------------------------------------------------------ the flow
 class MogMeFlow:
-    def __init__(self, store, policy, x, editor, queue_dir, fetch=httpx_get, clock=time.time):
+    def __init__(self, store, policy, x, editor, queue_dir, fetch=httpx_get, clock=time.time, rng=None):
         self.s, self.p, self.x, self.editor, self.fetch, self.clock = store, policy, x, editor, fetch, clock
         self.dir = Path(queue_dir)
         self.dir.mkdir(parents=True, exist_ok=True)
-        self.budget = replies.Budget(store, policy, self.day)
+        self.rng = rng or random.SystemRandom()
+        cfg = policy.raw.get("mog_me") or {}
+        self.tags = validate_tags(cfg.get("tags", []))      # bad tag config refuses boot
+        mogme_budget(policy); cost_per_mog(policy)           # missing prices refuse boot
+        try:
+            self.min_changed = float(cfg["min_changed_fraction"])
+        except (KeyError, TypeError, ValueError):
+            raise MogMeConfigError("mog_me.min_changed_fraction missing") from None
+
+    def spent(self, day=None):
+        return Decimal(self.s.get(f"mogme_spend:{day or self.day()}", "0"))
+
+    def _book(self, usd, day=None):
+        k = f"mogme_spend:{day or self.day()}"
+        self.s.put(k, str(Decimal(self.s.get(k, "0")) + usd))
+
+    def _room(self, usd, day=None):
+        return self.spent(day) + usd <= mogme_budget(self.p)
 
     def day(self):
         return datetime.fromtimestamp(self.clock(), timezone.utc).strftime("%Y-%m-%d")
@@ -320,9 +432,7 @@ class MogMeFlow:
             return ("ignored", "config")
         if int(self.s.get(f"mogme_count:{day}", 0)) >= cap:
             return ("ignored", "daily_cap")
-        spent = sum((Decimal(self.s.get(f"{k}:{day}", "0")) for k in ("reply_spend", "gemini_spend", "x_read_spend")),
-                    Decimal("0"))
-        if spent + per > _usd(self.p.raw["reply_budget_usd_per_day"], "reply_budget_usd_per_day"):
+        if not self._room(per, day):                     # mog-me's own budget, never the launch replies'
             return ("ignored", "budget")
         if not self._follows_bot(m, uid, day):           # last gate: may cost one user read
             return self._silent(mid, uid, "not_following")
@@ -341,18 +451,42 @@ class MogMeFlow:
             self._save(mid, uid, handle, None, POLITE_SKIP, note="fetch_failed")
             self.s.put(f"mogme_last:{uid}", now)
             return ("mog_me_skipped", "fetch_failed")
-        # generation spends money: book cap, cooldown and Gemini cost before calling
+        # generation spends money: book cap and cooldown first, and every try before calling
         self.s.put(f"mogme_count:{day}", int(self.s.get(f"mogme_count:{day}", 0)) + 1)
         self.s.put(f"mogme_last:{uid}", now)
-        gem = _usd(self.p.raw["mog_me"]["costs_usd"]["gemini_image"], "gemini_image")
-        self.s.put(f"gemini_spend:{day}", str(Decimal(self.s.get(f"gemini_spend:{day}", "0")) + gem))
         try:
-            edited = self.editor.edit_pfp(raw)
-        except EditRefused as e:
-            self.s.ledger_row("mogme_refused", {"mention_id": mid, "author_id": uid, "reason": str(e)})
-            return ("mog_me_refused", str(e))
-        self._save(mid, uid, handle, add_tag(edited), replies.mog_me_done(handle))
-        return ("mog_me_queued", mid)
+            src = upscale(raw)
+        except Exception:
+            self._save(mid, uid, handle, None, POLITE_SKIP, note="bad_image")
+            return ("mog_me_skipped", "bad_image")
+        gem = _usd(self.p.raw["mog_me"]["costs_usd"]["gemini_image"], "gemini_image")
+        tries, fractions = 0, []
+        while tries < MAX_EDIT_TRIES:
+            if not self._room(gem, day):
+                break
+            self._book(gem, day)
+            tries += 1
+            try:
+                edited = self.editor.edit_pfp(src)
+            except EditRefused as e:                     # safety/failed: logged, never retried
+                self.s.ledger_row("mogme_refused", {"mention_id": mid, "author_id": uid,
+                                                    "reason": str(e), "tries": tries})
+                return ("mog_me_refused", str(e))
+            try:
+                frac = changed_fraction(src, edited)
+            except Exception:
+                frac = 0.0
+            fractions.append(round(frac, 4))
+            if frac >= self.min_changed:
+                tag = pick_tag(self.tags, self.rng)
+                self._save(mid, uid, handle, add_tag(edited, tag), replies.mog_me_done(handle),
+                           extra={"tries": tries, "changed": fractions, "tag": tag})
+                return ("mog_me_queued", mid)
+        self.s.ledger_row("mogme_no_change", {"mention_id": mid, "author_id": uid, "tries": tries,
+                                              "changed": fractions})
+        self._save(mid, uid, handle, None, POLITE_NO_CHANGE, note="no_change",
+                   extra={"tries": tries, "changed": fractions})
+        return ("mog_me_skipped", "no_change" if tries == MAX_EDIT_TRIES else "budget")
 
     def _silent(self, mid, uid, reason):
         """Ineligible: no reply, no image, no edit. Logged only."""
@@ -370,8 +504,7 @@ class MogMeFlow:
             except Exception:
                 cs = None
             finally:
-                cost = _usd(self.p.raw["mog_me"]["costs_usd"]["user_read"], "user_read")
-                self.s.put(f"x_read_spend:{day}", str(Decimal(self.s.get(f"x_read_spend:{day}", "0")) + cost))
+                self._book(_usd(self.p.raw["mog_me"]["costs_usd"]["user_read"], "user_read"), day)
         return isinstance(cs, (list, tuple)) and "followed_by" in cs
 
     # -------------------------------------------------- queue
@@ -386,7 +519,7 @@ class MogMeFlow:
         tmp.write_text(json.dumps(item, indent=1))
         os.replace(tmp, p)
 
-    def _save(self, mid, uid, handle, png, text, note=None):
+    def _save(self, mid, uid, handle, png, text, note=None, extra=None):
         img_path = None
         if png is not None:
             img_path = str(self.dir / f"{mid}.png")
@@ -396,7 +529,7 @@ class MogMeFlow:
                      "image_sha256": hashlib.sha256(png).hexdigest() if png else None,
                      "note": note, "status": PENDING, "created_at": self.clock(),
                      "editor": getattr(self.editor, "name", "unknown") if png is not None else None,
-                     "approved_by": None, "reply_id": None})
+                     "approved_by": None, "decision_reason": None, "reply_id": None, **(extra or {})})
 
     def get(self, mid):
         try:
@@ -415,21 +548,43 @@ class MogMeFlow:
                 out.append(it)
         return out
 
-    def approve(self, mid, by):
-        return self._decide(mid, by, APPROVED)
+    def approve(self, mid, by, reason):
+        """reason: a short note (1-80 chars, one line), saved with the item."""
+        r = " ".join(str(reason or "").split())
+        if not 1 <= len(r) <= 80:
+            raise MogMeError("approve needs a short reason (1-80 chars)")
+        return self._decide(mid, by, APPROVED, r)
 
-    def reject(self, mid, by):
-        return self._decide(mid, by, REJECTED)
+    def reject(self, mid, by, reason):
+        """reason: one of REJECT_REASONS, optionally "other: <short note>"."""
+        r = " ".join(str(reason or "").split()).lower()
+        head = r.split(":", 1)[0].strip()
+        if head not in REJECT_REASONS or len(r) > 80 or (":" in r and head != "other"):
+            raise MogMeError("reject reason must be one of: " + " / ".join(REJECT_REASONS))
+        return self._decide(mid, by, REJECTED, r)
 
-    def _decide(self, mid, by, status):
+    def _decide(self, mid, by, status, reason):
         if not str(by or "").strip():
             raise MogMeError("owner approval needs a name")
         it = self.get(mid)
         if it is None or it["status"] != PENDING:
             raise MogMeError(f"{mid} is not PENDING")
-        it.update(status=status, approved_by=str(by).strip())
+        it.update(status=status, approved_by=str(by).strip(), decision_reason=reason)
         self._write(it)
         return it
+
+    def add_ref(self, mid, folder):
+        """Owner action: copy one APPROVED gemini mog into the style-reference folder."""
+        it = self.get(mid)
+        if not it or it["status"] not in (APPROVED, POSTED) or it.get("editor") != "gemini" or not it["image_path"]:
+            raise MogMeError(f"{mid} is not an approved gemini mog")
+        data = Path(it["image_path"]).read_bytes()
+        if hashlib.sha256(data).hexdigest() != it["image_sha256"]:
+            raise MogMeError("image changed after preview")
+        Path(folder).mkdir(parents=True, exist_ok=True)
+        dst = Path(folder) / f"ref_{mid}.png"
+        dst.write_bytes(data)
+        return str(dst)
 
     # -------------------------------------------------- posting (gated)
     def post_ready(self):
@@ -447,8 +602,10 @@ class MogMeFlow:
                 it["status"], it["note"] = REJECTED, "stub/unknown editor image never posts"
                 self._write(it)
                 continue
-            if not self.budget.try_spend(url=False):
+            reply_cost = _usd(self.p.raw["x_prices_usd"]["plain_post"], "plain_post")
+            if not self._room(reply_cost):                # mog-me budget, not the launch replies'
                 break
+            self._book(reply_cost)
             it["status"] = POSTING
             self._write(it)
             media = None

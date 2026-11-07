@@ -74,7 +74,7 @@ class Editor:
         self.calls.append(data)
         if self.refuse:
             raise mq.EditRefused("safety_block")
-        return png((512, 512), (255, 46, 147))
+        return png((512, 512), (250, 250, 250))       # clearly changed vs the blue avatar
 
 
 class Clock:
@@ -151,12 +151,18 @@ def test_cost_math_and_daily_cap():
     p = load()
     per = mq.cost_per_mog(p)
     assert per == Decimal("0.039") + Decimal("0.015") + Decimal("0.005") + Decimal("0.010")  # 0.069
-    assert mq.daily_cap(p) == 4                                   # floor(0.30 / 0.069)
-    assert mq.daily_cap(p) * per <= Decimal(str(p.reply_budget_usd_per_day))
+    assert mq.mogme_budget(p) == Decimal("5.00")                  # owner 2026-11-07, separate budget
+    assert mq.daily_cap(p) == 72                                  # floor(5.00 / 0.069), all first-try
+    assert mq.worst_case_per_mog(p) == Decimal("0.147")           # 3 Gemini tries + reply + 2 reads
+    assert int(Decimal("5.00") // mq.worst_case_per_mog(p)) == 34  # every mog needing all 3 tries
+
+
+def small_budget(usd="0.276"):
+    return {"mog_me": {**load().raw["mog_me"], "daily_budget_usd": usd}}
 
 
 def test_daily_cap_blocks_generation():
-    ed = Editor(); f, _ = flow(editor=ed)
+    ed = Editor(); f, _ = flow(editor=ed, policy_over=small_budget())          # cap 4
     results = [f.handle(mention(i, author=str(100 + i)))[0] for i in range(6)]
     assert results == ["mog_me_queued"] * 4 + ["ignored"] * 2
     assert f.handle(mention(9, author="900")) == ("ignored", "daily_cap")
@@ -170,11 +176,14 @@ def test_missing_price_fails_closed():
         mq.cost_per_mog(type(p)(raw))
 
 
-def test_budget_shared_with_other_replies_blocks_generation():
+def test_mogme_budget_is_separate_from_launch_replies():
     ed = Editor(); f, store = flow(editor=ed)
-    store.put(f"reply_spend:{f.day()}", "0.25")                    # coin replies already spent today
-    assert f.handle(mention(1)) == ("ignored", "budget")
-    assert ed.calls == []
+    store.put(f"reply_spend:{f.day()}", "0.30")                    # launch replies used their whole budget
+    assert f.handle(mention(1))[0] == "mog_me_queued"              # mog-me unaffected...
+    assert store.get(f"reply_spend:{f.day()}") == "0.30"           # ...and never touches it
+    store.put(f"mogme_spend:{f.day()}", "4.95")
+    assert f.handle(mention(2, author="222")) == ("ignored", "budget")
+    assert len(ed.calls) == 1
 
 
 # ------------------------------------------------------------------ preview / approval / kill
@@ -190,7 +199,7 @@ def test_preview_never_posts():
 
 def test_kill_switch_blocks_posting_even_when_approved():
     x = X(); f, store = flow(x=x, kill=True)
-    f.handle(mention(1)); f.approve("1", "sneaks")
+    f.handle(mention(1)); f.approve("1", "sneaks", "good fit")
     assert f.post_ready() == []
     assert x.replies == [] and x.media == []
     store.put("kill", None)                                        # missing/non-False = ON
@@ -200,7 +209,7 @@ def test_kill_switch_blocks_posting_even_when_approved():
 
 def test_approved_item_posts_once_when_kill_off():
     x = X(); f, _ = flow(x=x, kill=False)
-    f.handle(mention(1)); f.approve("1", "sneaks")
+    f.handle(mention(1)); f.approve("1", "sneaks", "good fit")
     assert f.post_ready() == [("1", "r1")]
     assert x.replies == [("1", x.replies[0][1], ["m1"])]
     assert f.get("1")["status"] == mq.POSTED
@@ -211,7 +220,7 @@ def test_approval_requires_a_name():
     f, _ = flow()
     f.handle(mention(1))
     with pytest.raises(mq.MogMeError):
-        f.approve("1", " ")
+        f.approve("1", " ", "good fit")
 
 
 def test_autopost_needs_flag_and_kill_off():
@@ -336,7 +345,7 @@ def test_stub_items_queue_but_never_post():
     f = mq.MogMeFlow(store, load(), x, mq.StubEditor(), tempfile.mkdtemp(), fetch=Fetch(), clock=Clock())
     assert f.handle(mention(1)) == ("mog_me_queued", "1")
     assert f.get("1")["editor"] == "stub"
-    f.approve("1", "sneaks")
+    f.approve("1", "sneaks", "good fit")
     assert f.post_ready() == []
     assert x.replies == [] and x.media == []
     assert f.get("1")["status"] == mq.REJECTED
@@ -392,7 +401,8 @@ def test_follow_gate(cs, answer, result):
     if result[0] == "ignored":
         assert ed.calls == [] and f.get("1") is None
     if cs == "MISSING":                                            # the lookup is booked against the budget
-        assert Decimal(store.get(f"x_read_spend:{f.day()}")) == Decimal("0.010")
+        booked = Decimal(store.get(f"mogme_spend:{f.day()}"))
+        assert booked == Decimal("0.010") + (Decimal("0.039") if result[0] == "mog_me_queued" else 0)
 
 
 def test_follow_lookup_only_after_free_gates():
@@ -403,7 +413,7 @@ def test_follow_lookup_only_after_free_gates():
 
 
 def test_get_mogged_tag_added_bottom_corner():
-    out = mq.add_tag(png((512, 512), (0, 0, 0)))
+    out = mq.add_tag(png((512, 512), (0, 0, 0)), "GET MOGGED")
     img = Image.open(io.BytesIO(out)).convert("RGB")
     assert img.size == (512, 512)
     assert img.getpixel((500, 500)) != (0, 0, 0)                   # tag drawn bottom-right
@@ -462,3 +472,180 @@ def test_run_refuses_boot_when_gemini_selected_without_key(monkeypatch, tmp_path
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     assert run.main(["mogme-list"]) == 2
     assert "GEMINI_API_KEY missing" in capsys.readouterr().out
+
+
+# ================================================================== owner fixes 2026-11-07 16:30
+class SameEditor:
+    """Returns its input untouched: the 'no change' failure."""
+    name = "gemini"
+
+    def __init__(self, succeed_on=None):
+        self.calls, self.succeed_on = [], succeed_on
+
+    def edit_pfp(self, data):
+        self.calls.append(data)
+        if self.succeed_on and len(self.calls) >= self.succeed_on:
+            return png((512, 512), (250, 250, 250))
+        return data
+
+
+def test_prompt_rules_no_brand_text():
+    t = mq.VIPERS_PROMPT
+    for phrase in ("wraparound shield sport sunglasses", "same art style as the input",
+                   "sized to the head", "centered on the eyes", "angle and tilt",
+                   "behind the ears or hair", "own palette", "No text, letters, logos or brand names"):
+        assert phrase in t, phrase
+    assert "pit viper" not in t.lower()
+
+
+def test_gemini_sends_up_to_three_style_refs_after_the_input():
+    import base64
+    sent = []
+
+    def post(url, json, timeout, headers):
+        sent.append(json); return 200, {"candidates": [{"content": {"parts": [
+            {"inlineData": {"data": base64.b64encode(png()).decode()}}]}}]}
+    refs = [png((64, 64), (i * 40, 0, 0)) for i in range(5)] + [b"not an image"]
+    ed = mq.GeminiEditor("fixture-only", post=post, refs=refs)
+    ed.edit_pfp(jpeg())
+    parts = sent[0]["contents"][0]["parts"]
+    assert parts[0]["text"] == mq.VIPERS_PROMPT and parts[1]["inline_data"]["mime_type"] == "image/jpeg"
+    assert parts[2]["text"] == mq.REFS_PROMPT
+    assert len(parts) == 3 + 3                                     # max 3 refs, junk dropped
+    ed0 = mq.GeminiEditor("fixture-only", post=post)
+    ed0.edit_pfp(jpeg())
+    assert len(sent[1]["contents"][0]["parts"]) == 2               # no refs = prompt + input only
+
+
+def test_load_refs_and_add_ref_owner_action(tmp_path):
+    folder = tmp_path / "refs"; folder.mkdir()
+    (folder / "junk.txt").write_text("hi")
+    for i in range(4):
+        (folder / f"r{i}.png").write_bytes(png((32, 32), (i, i, i)))
+    assert len(mq.load_refs(str(folder))) == 3
+    assert mq.load_refs(str(tmp_path / "missing")) == []
+    f, _ = flow()
+    f.handle(mention(1))
+    with pytest.raises(mq.MogMeError):
+        f.add_ref("1", str(tmp_path / "out"))                       # PENDING: not approved yet
+    f.approve("1", "sneaks", "great fit")
+    dst = f.add_ref("1", str(tmp_path / "out"))
+    assert Path(dst).read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+    stub_f, _ = flow(editor=mq.StubEditor())
+    stub_f.handle(mention(2, author="222")); stub_f.approve("2", "sneaks", "test")
+    with pytest.raises(mq.MogMeError):
+        stub_f.add_ref("2", str(tmp_path / "out"))                  # stub images never become refs
+
+
+def test_small_avatars_upscaled_before_edit():
+    ed = Editor(); f, _ = flow(editor=ed, fetch=Fetch(body=jpeg((200, 200))))
+    assert f.handle(mention(1))[0] == "mog_me_queued"
+    sent = Image.open(io.BytesIO(ed.calls[0]))
+    assert min(sent.size) == mq.UPSCALE_SIDE
+    ed2 = Editor(); f2, _ = flow(editor=ed2, fetch=Fetch(body=jpeg((600, 600))))
+    f2.handle(mention(1))
+    assert Image.open(io.BytesIO(ed2.calls[0])).size == (600, 600)  # big enough: untouched
+
+
+def test_no_change_retries_twice_then_polite_text_every_try_billed():
+    ed = SameEditor(); f, store = flow(editor=ed)
+    assert f.handle(mention(1)) == ("mog_me_skipped", "no_change")
+    assert len(ed.calls) == mq.MAX_EDIT_TRIES == 3
+    item = f.get("1")
+    assert item["image_path"] is None and item["note"] == "no_change" and item["tries"] == 3
+    assert item["reply_text"] == mq.POLITE_NO_CHANGE
+    assert Decimal(store.get(f"mogme_spend:{f.day()}")) == Decimal("0.039") * 3
+    assert store.ledger("mogme_no_change")
+
+
+def test_no_change_then_success_on_retry():
+    ed = SameEditor(succeed_on=2); f, store = flow(editor=ed)
+    assert f.handle(mention(1)) == ("mog_me_queued", "1")
+    assert len(ed.calls) == 2 and f.get("1")["tries"] == 2
+    assert Decimal(store.get(f"mogme_spend:{f.day()}")) == Decimal("0.078")
+
+
+def test_flat_overlay_counts_as_no_change():
+    def overlay(data):
+        im = Image.open(io.BytesIO(data)).convert("RGB")
+        d = __import__("PIL.ImageDraw", fromlist=["x"]).Draw(im)
+        w, h = im.size
+        d.rectangle((w * 0.30, h * 0.40, w * 0.45, h * 0.47), fill=(255, 0, 255))   # two small eye patches
+        d.rectangle((w * 0.55, h * 0.40, w * 0.70, h * 0.47), fill=(255, 0, 255))
+        out = io.BytesIO(); im.save(out, "PNG"); return out.getvalue()
+    src = png((512, 512), (90, 90, 200))
+    assert mq.changed_fraction(src, overlay(src)) < 0.06
+    assert mq.changed_fraction(src, png((512, 512), (250, 250, 250))) > 0.9
+
+
+def test_retry_stops_when_budget_runs_out():
+    ed = SameEditor()
+    f, store = flow(editor=ed, policy_over=small_budget("0.15"))   # room for 0.069 precheck, 3 tries = 0.117
+    store.put(f"mogme_spend:{f.day()}", "0.07")                     # 0.08 left: two tries max
+    assert f.handle(mention(1)) == ("mog_me_skipped", "budget")
+    assert len(ed.calls) == 2
+
+
+@pytest.mark.parametrize("reason,ok", [
+    ("wrong size", True), ("off the eyes", True), ("wrong angle", True), ("style mismatch", True),
+    ("flat overlay", True), ("other", True), ("other: cropped the hat", True), ("Wrong Size", True),
+    ("", False), ("ugly", False), ("wrong size: too big", False), ("other: " + "x" * 90, False),
+])
+def test_reject_reason_from_list(reason, ok):
+    f, _ = flow(); f.handle(mention(1))
+    if ok:
+        assert f.reject("1", "sneaks", reason)["decision_reason"] == " ".join(reason.split()).lower()
+        assert f.get("1")["status"] == mq.REJECTED
+    else:
+        with pytest.raises(mq.MogMeError):
+            f.reject("1", "sneaks", reason)
+        assert f.get("1")["status"] == mq.PENDING
+
+
+def test_approve_needs_short_reason_saved():
+    f, _ = flow(); f.handle(mention(1))
+    for bad in ("", "   ", "x" * 81):
+        with pytest.raises(mq.MogMeError):
+            f.approve("1", "sneaks", bad)
+    assert f.approve("1", "sneaks", "fits the  eyes")["decision_reason"] == "fits the eyes"
+
+
+@pytest.mark.parametrize("tag", ["visit justmog.it", "https://x.com", "BUY $MOG", "100X", "5 SOL", "10%",
+                                 "PIT VIPER", "OAKLEY MOG", "get mogged", "", "A" * 33, 7])
+def test_bad_tags_refuse_boot(tag):
+    with pytest.raises(mq.MogMeConfigError):
+        mq.validate_tags([tag])
+    with pytest.raises(mq.MogMeConfigError):
+        flow(policy_over={"mog_me": {**load().raw["mog_me"], "tags": ["GET MOGGED", tag]}})
+
+
+def test_policy_tags_valid_and_random_choice_includes_none():
+    tags = mq.validate_tags(load().raw["mog_me"]["tags"])
+    assert tags == ["GET MOGGED", "MOGGED BY BRAINROT LABS"]
+    import random
+    seen = {mq.pick_tag(tags, random.Random(i)) for i in range(60)}
+    assert seen == {None, "GET MOGGED", "MOGGED BY BRAINROT LABS"}
+
+
+def test_item_records_tag_and_no_tag_means_untouched_image():
+    class Fixed:
+        def __init__(self, v): self.v = v
+        def choice(self, seq): return self.v
+    for choice in (None, "MOGGED BY BRAINROT LABS"):
+        ed = Editor()
+        store = Store(clock=Clock()); store.put("kill", True)
+        f = mq.MogMeFlow(store, load(), X(), ed, tempfile.mkdtemp(), fetch=Fetch(), clock=Clock(), rng=Fixed(choice))
+        f.handle(mention(1))
+        it = f.get("1")
+        assert it["tag"] == choice
+        raw = Path(it["image_path"]).read_bytes()
+        assert (raw == png((512, 512), (250, 250, 250))) is (choice is None)
+
+
+def test_tag_stays_in_bottom_corner_off_center():
+    out = mq.add_tag(png((512, 512), (0, 0, 0)), "MOGGED BY BRAINROT LABS")
+    img = Image.open(io.BytesIO(out)).convert("RGB")
+    for y in range(0, 512 - 512 // 12):                                   # nothing above the bottom ~8%
+        for x in range(0, 512, 8):
+            assert img.getpixel((x, y)) == (0, 0, 0)
+    assert mq.add_tag(png(), None) == png()

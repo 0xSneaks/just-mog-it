@@ -10,11 +10,14 @@ There are two separate paths in this repo. Neither has launched a coin. Launch #
 DeepSeek pair evaluator (`bot/live/deepseek.py`, `deepseek-flash`) is connected and working. See Actions run 42407864926 (success/PASS) and `docs/DEEPSEEK-TIMEOUT.md`.
 **"mog me" on X** (`bot/mogme_queue.py`):
 - **Who gets mogged:** only the mention author, using their own PFP.
-- **Eligibility:** the author needs ≥ 60 followers, a checkmark (blue, business or government) and must follow @justmogit_bot. These are read from the user fields that come with that mention read. Anything missing or failed means a silent skip.
-- **Editor:** set by `IMAGE_EDITOR`, either `stub` (the default: a fixed test image, no network, never postable) or `gemini`, which needs `GEMINI_API_KEY` or boot is refused. The Gemini prompt is a verbatim copy of justmogit-site `api/mog.js` `vipers`.
-- **Posting:** previews go to an approval queue. `mogme-post` posts only APPROVED gemini items, and only with the kill switch OFF.
-- **Limits:** 1 per author per rolling 24 h; daily cap floor($0.30 / $0.069) = 4, shared with the reply budget.
-- The legacy `mogit/bot.py` listener refuses to start.
+- **Eligibility:** ≥ 60 followers, a checkmark, and following @justmogit_bot; otherwise a silent skip.
+- **Editor:** `IMAGE_EDITOR=stub` (the default; never postable) or `gemini` (needs `GEMINI_API_KEY`). The Gemini prompt is a verbatim copy of justmogit-site `api/mog.js` `vipers`: wraparound shield sport shades in the input's own art style, fitted to the face, colours from its palette, no brand text.
+- **Before the edit:** avatars under 512 px are upscaled to 1024. Up to 3 owner-approved style references go along with each edit; `mogme-ref ID` adds one.
+- **No-change check:** if under 6% of pixels changed, the try counts as a fail. There are at most 2 retries, then a polite text draft. Every try is billed.
+- **Tag:** none, or one line from `mog_me.tags` at random, in the bottom corner.
+- **Owner decisions:** approve and reject both need a short reason, which is saved with the item.
+- **Budget:** mog-me has its own $5.00/day, separate from the $0.30 launch-reply budget. That is 72 mogs/day if every one works on the first try, or 34 if every one needs all 3 tries.
+- **Posting:** `mogme-post` posts only APPROVED gemini items, and only with the kill switch OFF. Autopost is off.
 
 **Monday switch to Gemini:**
 1. Put `GEMINI_API_KEY` in the bot's runtime env.
