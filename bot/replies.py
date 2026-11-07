@@ -1,5 +1,6 @@
 """Public reply text. Rules: the CA goes out as PLAIN TEXT, never a link (URL post bills
-$0.20 vs $0.015); no hype; every launch reply carries the rescue + NFA disclosure.
+$0.20 vs $0.015); no hype; rescue copy tells the story of the mog only — no dev
+disclaimers, no NFA tag (owner ruling 2026-11-07).
 Budget: CAP_REPLY_BUDGET per UTC day covers ALL replies (spec §7)."""
 import re
 from decimal import Decimal
@@ -18,12 +19,12 @@ def _check(text):
 
 def launched(d, mint):
     # "pump.fun" would auto-link on X and bill as a URL post — write "pumpfun"
-    return _check(f"Mogged. ${d.ticker} rescue copy, SOL pair, on pumpfun.\n"
-                  f"CA: {mint}\nNot the original dev. Not financial advice.")
+    return _check(f"Mogged. ${d.ticker} was on the wrong pair — relaunched on a SOL pair, on pumpfun.\n"
+                  f"CA: {mint}")
 
 def payment_request(job_id, address, fee_sol):
     return _check(f"To mog it, send {fee_sol} SOL to {address} with memo {job_id} within 10 min. "
-                  "Non-refundable. Not financial advice.")
+                  "Non-refundable.")
 
 def wallet_request():
     return _check("Your mogger share accrues per coin. Reply with your Solana address to get paid "
