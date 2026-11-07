@@ -24,6 +24,8 @@ mog_me_enabled: false               # 0.16 off until X media-upload 403 is fixed
 mog_me:                             # "mog me" X flow (bot/mogme_queue.py): owner approval queue
   autopost: false                   # posting WITHOUT per-item approval; also needs kill switch OFF. Owner only.
   style: "vipers"                   # prompt: bot/mogme_queue.py VIPERS_PROMPT = justmogit-site api/mog.js vipers
+  approvers: ["sneaks", "muse"]     # owner 2026-11-07: no humans besides Sneaks; Muse is the bot's friendly voice
+                                    # and curates mog replies during testing. Nobody else can approve a post.
   daily_budget_max_usd: "10.00"     # owner ceiling: "10 bucks a day if it becomes really popular". Raise
                                     # daily_budget_usd to it by hand (mogme_budget_hit rows show demand).
   daily_budget_usd: "5.00"          # owner 2026-11-07: mog-me's own $/day; every Gemini try, follow lookup

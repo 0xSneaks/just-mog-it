@@ -517,6 +517,10 @@ class MogMeFlow:
         self.rng = rng or random.SystemRandom()
         cfg = policy.raw.get("mog_me") or {}
         self.traits = validate_traits(cfg.get("traits"))    # bad trait config refuses boot
+        approvers = cfg.get("approvers")                    # owner 2026-11-07: sneaks + muse (the bot's voice)
+        if not isinstance(approvers, list) or not approvers or not all(isinstance(a, str) and a.strip() for a in approvers):
+            raise MogMeConfigError("mog_me.approvers must be a non-empty list of names")
+        self.approvers = {a.strip().lower() for a in approvers}
         mogme_budget(policy); cost_per_mog(policy)           # missing prices refuse boot
         try:
             self.min_changed = float(cfg["min_changed_fraction"])
@@ -724,6 +728,8 @@ class MogMeFlow:
     def _decide(self, mid, by, status, reason):
         if not str(by or "").strip():
             raise MogMeError("owner approval needs a name")
+        if str(by).strip().lower() not in self.approvers:
+            raise MogMeError(f"{by!r} is not an approver (mog_me.approvers)")
         it = self.get(mid)
         if it is None or it["status"] != PENDING:
             raise MogMeError(f"{mid} is not PENDING")

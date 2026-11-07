@@ -771,3 +771,16 @@ def test_policy_ships_five_with_ten_ceiling_and_logs_budget_hits():
     store.put(f"mogme_spend:{f.day()}", "4.99")
     assert f.handle(mention(1)) == ("ignored", "budget")
     assert store.ledger("mogme_budget_hit")
+
+
+def test_only_named_approvers_can_decide():
+    assert load().raw["mog_me"]["approvers"] == ["sneaks", "muse"]
+    f, _ = flow(); f.handle(mention(1)); f.handle(mention(2, author="222"))
+    for who in ("random", "codex", "claude-code"):
+        with pytest.raises(mq.MogMeError):
+            f.approve("1", who, "looks good")
+    assert f.approve("1", "Muse", "clean fit")["approved_by"] == "Muse"
+    assert f.reject("2", "sneaks", "off the eyes")["status"] == mq.REJECTED
+    for bad in ([], None, [""], "muse"):
+        with pytest.raises(mq.MogMeConfigError):
+            flow(policy_over={"mog_me": {**load().raw["mog_me"], "approvers": bad}})
