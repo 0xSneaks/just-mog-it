@@ -13,6 +13,14 @@ class EvaluatorResult:
     selected_quote_mint: str | None
 
 
+class PairEvaluatorError(RuntimeError):
+    """A categorized evaluator failure safe to record by kind."""
+
+    def __init__(self, kind: str, detail: str = ""):
+        super().__init__(f"{kind}: {detail}" if detail else kind)
+        self.kind = kind
+
+
 @dataclass(frozen=True)
 class QuoteCandidate:
     mint: str
@@ -61,6 +69,7 @@ class ReviewResult:
     action: str
     reason: str
     selected_quote_mint: str | None = None
+    kind: str | None = None
 
 
 def validate_decision(raw, pair, registry, context):
@@ -138,5 +147,7 @@ class PairPreview:
             )
             raw = self.evaluator(pair, context)
             return validate_decision(raw, pair, registry, context), context
+        except PairEvaluatorError as exc:
+            return ReviewResult("reject", "pair_review_failed", kind=exc.kind), None
         except (PairDataError, KeyError, RuntimeError, OSError):
             return ReviewResult("reject", "pair_review_failed"), None

@@ -10,7 +10,7 @@ from email.utils import parsedate_to_datetime
 
 import httpx
 
-from ..pair_review import EvaluatorResult, PairPreview
+from ..pair_review import EvaluatorResult, PairEvaluatorError, PairPreview
 from .http import env
 
 URL = "https://api.deepseek.com/chat/completions"
@@ -27,14 +27,6 @@ fits better, or reject with a null quote if no option fits. Use only the
 supplied exact candidate mints. Write a reason of at most 280 characters and
 make no promises about price, backing or payouts.
 """
-
-
-class PairEvaluatorError(RuntimeError):
-    """PairPreview catches this as a failed preview."""
-
-    def __init__(self, kind: str, detail: str = ""):
-        super().__init__(f"{kind}: {detail}" if detail else kind)
-        self.kind = kind
 
 
 def _nonnegative_number(value, field):

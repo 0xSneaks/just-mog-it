@@ -189,6 +189,7 @@ class Engine:
                 "target_mint": ca,
                 "action": decision.action,
                 "reason": decision.reason,
+                **({"kind": decision.kind} if decision.kind is not None else {}),
                 "selected_quote_mint": decision.selected_quote_mint,
                 "reply_preview": reply,
             }, job_id=job_id, db=db)
