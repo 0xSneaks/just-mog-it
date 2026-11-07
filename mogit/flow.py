@@ -5,6 +5,7 @@ import base64, hashlib, json, re, time
 from decimal import Decimal
 from .guard import inspect, GuardError, b58, _cu16
 from .ledger import LedgerError
+from . import gates
 
 BANNED = {"trump", "elon", "musk", "biden", "nike", "disney"}  # supplemental; real-person/brand needs Sneaks yes
 FEE_TOLERANCE_LAMPORTS = 100_000  # FIX 2 slack over the quote: 2 signatures of base fee plus priority-fee jitter
@@ -42,6 +43,7 @@ class Session:
         bal = Decimal(str(self.chain.balance_sol()))
         if bal < Decimal(str(q["sol"])): raise LedgerError(f"wallet underfunded: need {q['sol']}, have {bal}")
         st = self.ledger.check(q["usd"])
+        gates.check_preflight(self.ledger, st, q, self.clock())  # kill · 3/day · SOL quote · first buy 0 · quote cap
         return q, bal, st
 
     def handle(self, text):
@@ -108,6 +110,8 @@ class Session:
         if delta is None: return self._refuse("simulation missing payer_lamports_delta")  # HOLE-1: refuse, never KeyError
         spend = -int(delta)                        # lamports the payer actually loses in simulation
         if spend < 0: return self._refuse("simulation delta positive: payer would gain lamports")
+        try: gates.check_spend(spend)              # 0.025 SOL hard cap on the simulated spend
+        except LedgerError as e: return self._refuse(e)
         quote_lamports = int(Decimal(str(q["sol"])) * 1_000_000_000)
         if spend > quote_lamports + FEE_TOLERANCE_LAMPORTS:  # FIX 2: simulated spend checked against the quote
             return self._refuse(f"simulated cost {spend} lamports exceeds quote {quote_lamports} + fee tolerance")
@@ -136,14 +140,17 @@ class Session:
         tx_bytes = base64.b64decode(self.tx) if isinstance(self.tx, str) else bytes(self.tx)
         if hashlib.sha256(tx_bytes).hexdigest() != self.card["tx.sha256"]: return self._refuse("terms changed")
         with self.ledger.locked():  # FIX 4: check -> reserve -> submit -> settle, one session at a time
-            try: self._preflight(); inspect(self.tx, self.card["mint"])
+            try:
+                self._preflight(); inspect(self.tx, self.card["mint"])  # gates re-run under the lock, before sign
+                gates.check_spend(-int(self.card["sim.lamports_delta"]))
             except (LedgerError, GuardError) as e: return self._refuse(e)
             cost = self.card["cost.usd"]
             try: signed = self.vault.sign(self.tx, th)
             except Exception as e:  # nothing signed, nothing sent: no reservation needed, no budget spent
                 return self._refuse(f"sign error: {e}; nothing submitted, no budget spent")
             sig = _first_sig(signed)  # C2: first signature of the signed tx, recorded before submit
-            try: rid = self.ledger.reserve(cost, {"mint": self.card["mint"], "terms_hash": th, "tx_sig": sig})  # FIX 3: pending BEFORE submit
+            try: rid = self.ledger.reserve(cost, {"mint": self.card["mint"], "terms_hash": th, "tx_sig": sig,
+                                                  "ts": self.clock()})  # ts feeds the 3/day gate  # FIX 3: pending BEFORE submit
             except LedgerError as e: return self._refuse(e)
             try: res = self.mogz.submit(signed)
             except Exception as e:  # outcome unknown (e.g. timeout after send): keep the reservation against the cap
@@ -157,7 +164,8 @@ class Session:
                 # signature found) may release it. A held reservation fails safe: the cap shrinks.
                 self.ledger.mark_unconfirmed(rid)
                 return self._refuse(f"launch unconfirmed: {res.get('err')}; reservation {rid} held against the cap until reconcile")
-            record = {"mint": self.card["mint"], "tx": res["sig"], "terms_hash": th, "cost_usd": cost}
+            record = {"mint": self.card["mint"], "tx": res["sig"], "terms_hash": th, "cost_usd": cost,
+                      "ts": self.clock()}
             try: self.ledger.settle(rid, record)
             except Exception as e:  # FIX 3: a settle failure after a successful send must not lose the spend record
                 self.state = "idle"

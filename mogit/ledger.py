@@ -66,16 +66,40 @@ class Ledger:
         reserved = sum((Decimal(str(p["cost_usd"])) for p in pending), Decimal("0"))
         return {"spent_usd": spent, "cap_usd": cap, "reserved_usd": reserved,
                 "remaining_usd": cap - spent - reserved,
-                "launches": data.get("launches", []), "pending": pending}
+                "launches": data.get("launches", []), "pending": pending,
+                "kill": data.get("kill")}  # raw; only exactly False means OFF (see kill_on)
 
     def _save(self, st, spent_usd, launches, pending):
         data = {"cap_usd": str(st["cap_usd"]), "spent_usd": str(spent_usd),
                 "launches": launches, "pending": pending}
+        if st.get("kill") is not None:
+            data["kill"] = st["kill"]  # persist the kill switch across every write
         d = os.path.dirname(os.path.abspath(self.path))
         fd, tmp = tempfile.mkstemp(dir=d, prefix=".ledger.")
         with os.fdopen(fd, "w") as f:
             json.dump(data, f, indent=2)
         os.replace(tmp, self.path)
+
+    def kill_on(self):
+        """Kill switch, persisted in the ledger file. ON unless the stored value is exactly
+        False: a missing key, any other value, or an unreadable ledger all mean ON."""
+        try:
+            return self.load()["kill"] is not False
+        except LedgerError:
+            return True
+
+    def set_kill(self, on):
+        with self.locked():
+            st = self.load()
+            st["kill"] = bool(on)
+            self._save(st, st["spent_usd"], st["launches"], st["pending"])
+            if self.kill_on() != bool(on):
+                raise LedgerError("ledger read-back mismatch on set_kill")
+            return bool(on)
+
+    def boot(self):
+        """Kill switch ON at boot (owner §0). The owner turns it OFF explicitly."""
+        return self.set_kill(True)
 
     def check(self, cost_usd):
         st = self.load()

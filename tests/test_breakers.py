@@ -24,7 +24,8 @@ class M:
         self.tx = tx
         self.simr = sim if sim is not None else {"payer_lamports_delta": -20591640}
         self.ok = ok
-        self.q = {"sol": sol, "usd": usd, "mint": mint or "EarneMetyCsEqac2EEiLUh3VdR6bMre6cqM9rftNc6jB"}
+        self.q = {"sol": sol, "usd": usd, "mint": mint or "EarneMetyCsEqac2EEiLUh3VdR6bMre6cqM9rftNc6jB",
+                  "quote_mint": "So11111111111111111111111111111111111111112", "first_buy_lamports": 0}
         self.sent = []
         self.simulated = False
     def quote(self): return dict(self.q)
@@ -49,7 +50,7 @@ def make_ledger(spent="15.91", cap="30", launches=None, raw=None):
     if raw is not None:
         Path(p).write_text(raw)
     else:
-        data = {"cap_usd": cap, "spent_usd": spent}
+        data = {"cap_usd": cap, "spent_usd": spent, "kill": False}
         if launches is not None:
             data["launches"] = launches
         Path(p).write_text(json.dumps(data))
