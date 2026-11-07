@@ -1,3 +1,19 @@
+# JustMogIt — what is built (2026-11-07)
+
+There are two separate paths in this repo. Neither has launched a coin. Launch #001 (mogz.fun) was made by hand through an external executor, not by this code.
+
+| Path | What it is | Status |
+|---|---|---|
+| `mogit/` | **Money core.** Lifetime $30 ledger cap, reserve-before-submit, tx guard (pinned to Meteora DBC), simulate-before-send, and hard gates in `mogit/gates.py`: kill switch (persisted, default ON), max 3 launches/UTC day, 0.025 SOL per-launch cap on simulated spend, SOL-only quote, first buy 0. | BUILT, offline. **No venue adapter.** The venue is pump.fun or Float, undecided (owner, 2026-11-07). mogz.fun is out. |
+| `bot/` | **X engine** (mentions → gates → dossier → reservation → fire → reply) plus the **pump.fun pipeline** (PumpPortal create, pump guard). | Logic BUILT offline with fake adapters. The pump.fun pipeline is SPECCED and has never launched. |
+
+DeepSeek pair evaluator (`bot/live/deepseek.py`, `deepseek-flash`) is connected and working. See Actions run 42407864926 (success/PASS) and `docs/DEEPSEEK-TIMEOUT.md`.
+`bot/callout.py` (mogz.fun callouts) is parked with mogz. Do not extend it unless a venue decision revives mogz callouts.
+
+Run: `pip install -r requirements.txt && python3 -m pytest -q`
+
+---
+
 # MogIt bot core — grok-bot/builder (branch grok-bot/bot-core)
 
 Status: INTENT/VERIFIED-local. Core flow + 4 gates + mock tests. **No adapters wired, nothing can sign or send.**
@@ -11,7 +27,7 @@ Status: INTENT/VERIFIED-local. Core flow + 4 gates + mock tests. **No adapters w
 
 Pins: program `dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN` (Meteora DBC), discriminator `8c55d7b06636684f`, 16 accounts, launch wallet `2LYQUArY…sHvh7`… fixed idx 0,1,2,4,9–15.
 
-Run: `python3 -m unittest discover -s tests -v`
+Run: `python3 -m pytest -q`
 
 Open: surface (Sneaks decides), real adapters (muse's Mogz flow + vault `execution.sign_mogz`), real ledger file (muse holds it), image verifier. Review → claude-code before any live use.
 
@@ -39,7 +55,7 @@ Order: gates → dossier/eligibility → **then** ask for the 0.02 SOL fee → r
 
 Live adapters (`bot/live/`): X v2 (mentions, reply, chunked media upload), Solana RPC (simulate payer delta, dual send, status, blockhash expiry, PDA), PumpPortal trade-local create + collectCreatorFee with Pinata metadata, DAS + pump.fun + DexScreener dossier, Gemini inspection + eye landmarks, 0.02 SOL payment verifier (memo = job id, no replay), vault signer client. `bot/pumpguard.py` decodes the pump.fun create/buy/claim instructions and refuses anything else. Runner/console: `python3 -m bot.run` (loop --dry-run, status, approve, launch, kill, bankroll).
 
-Run: `python3 -m unittest discover -s tests -v` (131 OK: 67 money core + 64 bot).
+Run: `python3 -m pytest -q` (the full suite; see the top of this file).
 
 VERIFIED offline only — this build box can't reach X, Solana RPC, pump.fun, PumpPortal, Pinata or Gemini. PDA derivation VERIFIED against two real addresses (Meteora DBC + pump.fun event authorities). Discriminators VERIFIED by sha256 against published values.
 
