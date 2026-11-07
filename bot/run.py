@@ -77,8 +77,7 @@ def mogme_flow(store, p, x):
     """The "mog me" approval queue. IMAGE_EDITOR picks the editor (default stub); gemini without
     GEMINI_API_KEY raises MogMeConfigError, which refuses boot."""
     from .mogme_queue import MogMeFlow, build_editor
-    return MogMeFlow(store, p, x, build_editor(logo_odds=p.raw["mog_me"].get("frame_logo_odds", "0.5")),
-                     os.environ.get("JMI_MOGME_QUEUE", "mogme_queue"))
+    return MogMeFlow(store, p, x, build_editor(), os.environ.get("JMI_MOGME_QUEUE", "mogme_queue"))
 
 def loop(dry_run):
     store = Store(os.environ.get("JMI_DB", "justmogit.db"))
@@ -131,8 +130,14 @@ def mogme_cmd(cmd, args):
         hits = sum(1 for r in store.ledger("mogme_budget_hit") if r["ts"] >= time.time() - 86_400)
         print(f"mog-me spend today ${flow.spent()} of ${p.raw['mog_me']['daily_budget_usd']} "
               f"(ceiling ${p.raw['mog_me']['daily_budget_max_usd']}); budget hits last 24h: {hits}")
+        from collections import Counter
+        tally = Counter(f"{k}={v}" for it in flow.items() for k, v in (it.get("traits") or {}).items()
+                        if k in ("frame_text", "caption"))
+        print("traits so far:", dict(sorted(tally.items())) or "none")
         for it in flow.items(args[0] if args else None):
-            print(it["mention_id"], it["status"], it["handle"], it["image_path"], it["reply_text"])
+            tr = it.get("traits") or {}
+            print(it["mention_id"], it["status"], it["handle"], it["image_path"], it["reply_text"],
+                  f"frame_text={tr.get('frame_text')} caption={tr.get('caption')} palette={tr.get('palette')}")
         return 0
     try:
         if cmd == "mogme-approve":

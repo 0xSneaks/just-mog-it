@@ -206,12 +206,50 @@ REFS_PROMPT = (  # verbatim in justmogit-site api/mog.js (REFS_PROMPT)
     "The images after this text are owner-approved examples of the target look. Copy only how their shades are shaped, fitted to the face and drawn in each picture's own art style. Do NOT copy any text, letters, words, logos or brand names from them (ignore any lettering on their frames), and never copy their faces, characters, clothing, jewellery, captions or backgrounds.")
 
 
+PLACEMENT_PROMPT = (
+    "Fit check before you finish: both lenses sit exactly over the eyes, the top edge of the frame "
+    "sits just above the eyebrows, the frame is as wide as the face at eye level, it tilts with the "
+    "line of the eyes and turns with the head, and it never covers the nose tip or mouth.")
+NO_TEXT_SENTENCE = "No text, letters, logos or brand names anywhere on the frames or lenses."
+
+
+def palette_prompt(palette):
+    """palette: hex colours taken from the picture itself (see palette_of)."""
+    if not palette:
+        return ""
+    return ("Colour match: use only these colours, taken from the picture itself, for the frames and "
+            "lenses: " + ", ".join(palette) + ". Frames in one of them, lenses as a gradient of two others.")
+
+
+def compose_prompt(traits=None):
+    """The base VIPERS_PROMPT (identical to justmogit-site api/mog.js) plus this mog's traits:
+    frame lettering, the picture's own palette, and the fit check."""
+    traits = traits or {}
+    text = traits.get("frame_text")
+    if text == "PIT VIPER":
+        base = VIPERS_LOGO_PROMPT
+    elif text:
+        base = VIPERS_PROMPT.replace(NO_TEXT_SENTENCE, f"Put the {text} lettering small and clean on the side "
+                                     "of the frames, and no other text anywhere on the frames or lenses.")
+    else:
+        base = VIPERS_PROMPT
+    return " ".join(x for x in (base, palette_prompt(traits.get("palette")), PLACEMENT_PROMPT) if x)
+
+
+def refs_prompt(traits=None):
+    text = (traits or {}).get("frame_text")
+    if text == "PIT VIPER":
+        return REFS_LOGO_PROMPT
+    if text:
+        return REFS_LOGO_PROMPT.replace("the PIT VIPER logo", f"the {text} lettering")
+    return REFS_PROMPT
+
+
 class StubEditor:
     """No network. Returns one fixed test image. Items it produces can never be posted."""
     name = "stub"
-    last_variant = None
 
-    def edit_pfp(self, image_bytes):
+    def edit_pfp(self, image_bytes, traits=None):
         im = Image.new("RGB", (512, 512), (20, 20, 20))
         d = ImageDraw.Draw(im)
         for k in range(0, 512, 32):
@@ -226,10 +264,9 @@ class GeminiEditor:
     image inline. No retry. A safety block or a response with no image raises EditRefused."""
     name = "gemini"
 
-    def __init__(self, api_key, model=GEMINI_MODEL, post=None, refs=(), logo_odds=0.5, rng=None):
+    def __init__(self, api_key, model=GEMINI_MODEL, post=None, refs=()):
         if not api_key or not str(api_key).strip():
             raise MogMeConfigError("GEMINI_API_KEY missing")
-        self.logo_odds, self._rng, self.last_variant = check_odds(logo_odds), rng or random.SystemRandom(), None
         self._key, self.model = str(api_key).strip(), model
         self._post = post or self._httpx_post
         self.refs = [r for r in refs if _sniff(r)][:MAX_REFS]
@@ -243,16 +280,14 @@ class GeminiEditor:
         except ValueError:
             return r.status_code, {}
 
-    def edit_pfp(self, image_bytes):
+    def edit_pfp(self, image_bytes, traits=None):
         mime = _sniff(image_bytes)
         if mime is None:
             raise EditRefused("bad_input_image")
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
-        logo = self._rng.random() < self.logo_odds        # random PIT VIPER logo per edit
-        self.last_variant = "logo" if logo else "plain"
-        parts = [{"text": VIPERS_LOGO_PROMPT if logo else VIPERS_PROMPT}, _inline(image_bytes, mime)]
+        parts = [{"text": compose_prompt(traits)}, _inline(image_bytes, mime)]
         if self.refs:
-            parts += [{"text": REFS_LOGO_PROMPT if logo else REFS_PROMPT}] + [_inline(r, _sniff(r)) for r in self.refs]
+            parts += [{"text": refs_prompt(traits)}] + [_inline(r, _sniff(r)) for r in self.refs]
         body = {"contents": [{"parts": parts}]}
         try:
             status, out = self._post(url, json=body, timeout=GEMINI_TIMEOUT_S,
@@ -302,17 +337,7 @@ def load_refs(folder):
     return out
 
 
-def check_odds(v):
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        raise MogMeConfigError("mog_me.frame_logo_odds must be a number 0..1") from None
-    if not 0.0 <= f <= 1.0:
-        raise MogMeConfigError("mog_me.frame_logo_odds must be a number 0..1")
-    return f
-
-
-def build_editor(env=None, logo_odds=0.5):
+def build_editor(env=None):
     """IMAGE_EDITOR=stub (default) | gemini. gemini without GEMINI_API_KEY refuses (fail closed);
     an unknown value refuses. Never falls back silently."""
     env = os.environ if env is None else env
@@ -321,7 +346,7 @@ def build_editor(env=None, logo_odds=0.5):
         return StubEditor()
     if kind == "gemini":
         return GeminiEditor(env.get("GEMINI_API_KEY", ""), model=(env.get("GEMINI_IMAGE_MODEL") or GEMINI_MODEL).strip(),
-                            refs=load_refs(env.get("JMI_MOGME_REFS", "mogme_refs")), logo_odds=logo_odds)
+                            refs=load_refs(env.get("JMI_MOGME_REFS", "mogme_refs")))
     raise MogMeConfigError(f"IMAGE_EDITOR must be stub or gemini, got {kind!r}")
 
 
@@ -340,14 +365,80 @@ def validate_tags(tags):
     return list(tags)
 
 
-def pick_tag(tags, rng):
-    """No tag, or one line from the list, chosen at random with equal odds."""
-    return rng.choice([None] + list(tags))
+TRAIT_KEYS = ("frame_text", "caption")
+FRAME_TEXT_OK = frozenset({"PIT VIPER", "GET MOGGED", "MOG"})   # owner-approved frame lettering
 
 
-def add_tag(data, text):
-    """Small tag in the bottom-right corner (at most ~6% of the height, kept off the centered
-    face). text=None returns the image unchanged."""
+def validate_traits(cfg):
+    """mog_me.traits: {frame_text: [{value, weight}], caption: [{value, weight}]}. value null = none.
+    Captions follow the tag rules; frame lettering must be owner-approved. Bad config refuses boot."""
+    if not isinstance(cfg, dict) or set(cfg) != set(TRAIT_KEYS):
+        raise MogMeConfigError("mog_me.traits needs exactly frame_text and caption")
+    out = {}
+    for key in TRAIT_KEYS:
+        rows = cfg[key]
+        if not isinstance(rows, list) or not rows:
+            raise MogMeConfigError(f"mog_me.traits.{key} must be a non-empty list")
+        clean = []
+        for row in rows:
+            if not isinstance(row, dict) or set(row) != {"value", "weight"}:
+                raise MogMeConfigError(f"mog_me.traits.{key} rows need value + weight")
+            v, w = row["value"], row["weight"]
+            if isinstance(w, bool) or not isinstance(w, int) or w < 0:
+                raise MogMeConfigError(f"mog_me.traits.{key} weight must be a whole number >= 0")
+            if v is not None:
+                if key == "caption":
+                    validate_tags([v])
+                elif v not in FRAME_TEXT_OK:
+                    raise MogMeConfigError(f"frame lettering not owner-approved: {v!r}")
+            clean.append((v, w))
+        if sum(w for _, w in clean) <= 0:
+            raise MogMeConfigError(f"mog_me.traits.{key} weights sum to 0")
+        out[key] = clean
+    return out
+
+
+def draw_traits(traits, rng):
+    """One weighted draw per trait, once per mog (retries keep the same traits)."""
+    return {k: rng.choices([v for v, _ in rows], weights=[w for _, w in rows])[0] for k, rows in traits.items()}
+
+
+def _hex(c):
+    return "#%02x%02x%02x" % c[:3]
+
+
+def palette_of(data, n=4):
+    """The picture's own main colours (median-cut), most common first; near-duplicates and colours
+    under 2% of the picture are dropped."""
+    with Image.open(io.BytesIO(data)) as im:
+        small = im.convert("RGB").resize((128, 128))
+    q = small.quantize(colors=8, method=Image.Quantize.MEDIANCUT)
+    pal = q.getpalette()[:24]
+    counts = sorted(q.getcolors(), reverse=True)
+    out = []
+    total = sum(n for n, _ in counts)
+    for cnt, idx in counts:
+        if cnt < 0.02 * total:                       # edge blends / specks are not the picture's palette
+            continue
+        c = tuple(pal[idx * 3: idx * 3 + 3])
+        if all(sum(abs(a - b) for a, b in zip(c, o)) > 60 for o in out):
+            out.append(c)
+        if len(out) == n:
+            break
+    return [_hex(c) for c in out]
+
+
+def _rgb(h):
+    return tuple(int(h[i:i + 2], 16) for i in (1, 3, 5))
+
+
+def _lum(c):
+    return 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]
+
+
+def add_tag(data, text, palette=None):
+    """Small caption in the bottom-right corner (at most ~6% of the height, kept off the centered
+    face), coloured from the picture's own palette. text=None returns the image unchanged."""
     if not text:
         return data
     with Image.open(io.BytesIO(data)) as im:
@@ -363,9 +454,15 @@ def add_tag(data, text):
     pad = max(4, size // 3)
     bw, bh = (r - l) + 2 * pad, (b - t) + 2 * pad
     x0, y0 = w - bw - pad, h - bh - pad
-    d.rounded_rectangle((x0, y0, w - pad, h - pad), radius=pad, fill=(10, 10, 10, 230),
-                        outline=(255, 46, 147, 255), width=max(1, size // 10))
-    d.text((x0 + pad - l, y0 + pad - t), text, font=font, fill=(0, 255, 230, 255))
+    cols = [_rgb(c) for c in (palette or [])] or [(10, 10, 10), (255, 46, 147), (0, 255, 230)]
+    box = min(cols, key=_lum)                                   # darkest picture colour
+    ink = max(cols, key=lambda c: abs(_lum(c) - _lum(box)))     # most contrast against it
+    if abs(_lum(ink) - _lum(box)) < 90:                         # flat palette: keep it readable
+        ink = (255, 255, 255) if _lum(box) < 128 else (0, 0, 0)
+    edge = next((c for c in cols if c not in (box, ink)), ink)
+    d.rounded_rectangle((x0, y0, w - pad, h - pad), radius=pad, fill=(*box, 230),
+                        outline=(*edge, 255), width=max(1, size // 10))
+    d.text((x0 + pad - l, y0 + pad - t), text, font=font, fill=(*ink, 255))
     out = io.BytesIO()
     canvas.convert("RGB").save(out, "PNG")
     return out.getvalue()
@@ -413,7 +510,7 @@ class MogMeFlow:
         self.dir.mkdir(parents=True, exist_ok=True)
         self.rng = rng or random.SystemRandom()
         cfg = policy.raw.get("mog_me") or {}
-        self.tags = validate_tags(cfg.get("tags", []))      # bad tag config refuses boot
+        self.traits = validate_traits(cfg.get("traits"))    # bad trait config refuses boot
         mogme_budget(policy); cost_per_mog(policy)           # missing prices refuse boot
         try:
             self.min_changed = float(cfg["min_changed_fraction"])
@@ -490,6 +587,11 @@ class MogMeFlow:
             self._save(mid, uid, handle, None, POLITE_SKIP, note="bad_image")
             return ("mog_me_skipped", "bad_image")
         gem = _usd(self.p.raw["mog_me"]["costs_usd"]["gemini_image"], "gemini_image")
+        traits = draw_traits(self.traits, self.rng)       # NFT-style: one draw per mog
+        try:
+            traits["palette"] = palette_of(src)
+        except Exception:
+            traits["palette"] = []
         tries, fractions = 0, []
         while tries < MAX_EDIT_TRIES:
             if not self._room(gem, day):
@@ -497,7 +599,7 @@ class MogMeFlow:
             self._book(gem, day)
             tries += 1
             try:
-                edited = self.editor.edit_pfp(src)
+                edited = self.editor.edit_pfp(src, traits=traits)
             except EditRefused as e:                     # safety/failed: logged, never retried
                 self.s.ledger_row("mogme_refused", {"mention_id": mid, "author_id": uid,
                                                     "reason": str(e), "tries": tries})
@@ -508,10 +610,9 @@ class MogMeFlow:
                 frac = 0.0
             fractions.append(round(frac, 4))
             if frac >= self.min_changed:
-                tag = pick_tag(self.tags, self.rng)
-                self._save(mid, uid, handle, add_tag(edited, tag), replies.mog_me_done(handle),
-                           extra={"tries": tries, "changed": fractions, "tag": tag,
-                                  "frame_logo": getattr(self.editor, "last_variant", None) == "logo"})
+                self._save(mid, uid, handle, add_tag(edited, traits["caption"], traits["palette"]),
+                           replies.mog_me_done(handle),
+                           extra={"tries": tries, "changed": fractions, "traits": traits})
                 return ("mog_me_queued", mid)
         self.s.ledger_row("mogme_no_change", {"mention_id": mid, "author_id": uid, "tries": tries,
                                               "changed": fractions})

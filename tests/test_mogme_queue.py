@@ -70,7 +70,7 @@ class Editor:
     def __init__(self, refuse=False):
         self.refuse, self.calls = refuse, []
 
-    def edit_pfp(self, data):
+    def edit_pfp(self, data, traits=None):
         self.calls.append(data)
         if self.refuse:
             raise mq.EditRefused("safety_block")
@@ -304,13 +304,13 @@ def test_gemini_editor_request_and_refusals_mocked():
 
     def post(url, json, timeout, headers):
         calls.append((url, json, headers)); return post.resp
-    ed = mq.GeminiEditor("fixture-only", post=post, logo_odds=0)
+    ed = mq.GeminiEditor("fixture-only", post=post)
     post.resp = (200, {"candidates": [{"content": {"parts": [
         {"inlineData": {"mimeType": "image/png", "data": base64.b64encode(png()).decode()}}]}}]})
     assert ed.edit_pfp(jpeg())[:8] == b"\x89PNG\r\n\x1a\n"
     url, body, headers = calls[0]
     assert url.endswith("/models/gemini-2.5-flash-image:generateContent")
-    assert body["contents"][0]["parts"][0]["text"] == mq.VIPERS_PROMPT
+    assert body["contents"][0]["parts"][0]["text"] == mq.compose_prompt(None)
     assert body["contents"][0]["parts"][1]["inline_data"]["mime_type"] == "image/jpeg"
     assert headers["x-goog-api-key"] == "fixture-only"
     for resp in [(200, {"promptFeedback": {"blockReason": "SAFETY"}}),
@@ -480,10 +480,10 @@ class SameEditor:
     name = "gemini"
 
     def __init__(self, succeed_on=None):
-        self.calls, self.succeed_on = [], succeed_on
+        self.calls, self.succeed_on, self.traits_seen = [], succeed_on, []
 
-    def edit_pfp(self, data):
-        self.calls.append(data)
+    def edit_pfp(self, data, traits=None):
+        self.calls.append(data); self.traits_seen.append(dict(traits or {}))
         if self.succeed_on and len(self.calls) >= self.succeed_on:
             return png((512, 512), (250, 250, 250))
         return data
@@ -506,10 +506,10 @@ def test_gemini_sends_up_to_three_style_refs_after_the_input():
         sent.append(json); return 200, {"candidates": [{"content": {"parts": [
             {"inlineData": {"data": base64.b64encode(png()).decode()}}]}}]}
     refs = [png((64, 64), (i * 40, 0, 0)) for i in range(5)] + [b"not an image"]
-    ed = mq.GeminiEditor("fixture-only", post=post, refs=refs, logo_odds=0)
+    ed = mq.GeminiEditor("fixture-only", post=post, refs=refs)
     ed.edit_pfp(jpeg())
     parts = sent[0]["contents"][0]["parts"]
-    assert parts[0]["text"] == mq.VIPERS_PROMPT and parts[1]["inline_data"]["mime_type"] == "image/jpeg"
+    assert parts[0]["text"] == mq.compose_prompt(None) and parts[1]["inline_data"]["mime_type"] == "image/jpeg"
     assert parts[2]["text"] == mq.REFS_PROMPT
     assert len(parts) == 3 + 3                                     # max 3 refs, junk dropped
     ed0 = mq.GeminiEditor("fixture-only", post=post)
@@ -612,34 +612,119 @@ def test_approve_needs_short_reason_saved():
 
 @pytest.mark.parametrize("tag", ["visit justmog.it", "https://x.com", "BUY $MOG", "100X", "5 SOL", "10%",
                                  "PIT VIPER", "OAKLEY MOG", "get mogged", "", "A" * 33, 7])
-def test_bad_tags_refuse_boot(tag):
+def test_bad_captions_refuse_boot(tag):
     with pytest.raises(mq.MogMeConfigError):
         mq.validate_tags([tag])
+    traits = {**TRAITS, "caption": [{"value": "GET MOGGED", "weight": 1}, {"value": tag, "weight": 1}]}
     with pytest.raises(mq.MogMeConfigError):
-        flow(policy_over={"mog_me": {**load().raw["mog_me"], "tags": ["GET MOGGED", tag]}})
+        flow(policy_over={"mog_me": {**load().raw["mog_me"], "traits": traits}})
 
 
-def test_policy_tags_valid_and_random_choice_includes_none():
-    tags = mq.validate_tags(load().raw["mog_me"]["tags"])
-    assert tags == ["GET MOGGED", "MOGGED BY BRAINROT LABS"]
+TRAITS = load().raw["mog_me"]["traits"]
+
+
+@pytest.mark.parametrize("bad", [
+    None, {}, {"frame_text": TRAITS["frame_text"]},
+    {**TRAITS, "extra": []},
+    {**TRAITS, "frame_text": []},
+    {**TRAITS, "frame_text": [{"value": "SUPREME", "weight": 1}]},              # not owner-approved
+    {**TRAITS, "frame_text": [{"value": "PIT VIPER", "weight": -1}]},
+    {**TRAITS, "frame_text": [{"value": "PIT VIPER", "weight": 0}]},             # sums to 0
+    {**TRAITS, "caption": [{"value": "GET MOGGED", "weight": 1.5}]},
+    {**TRAITS, "caption": [{"value": "GET MOGGED"}]},
+])
+def test_bad_trait_config_refuses_boot(bad):
+    with pytest.raises(mq.MogMeConfigError):
+        mq.validate_traits(bad)
+
+
+def test_policy_traits_and_weighted_draw():
+    t = mq.validate_traits(TRAITS)
+    assert t == {"frame_text": [("PIT VIPER", 1), (None, 1)],
+                 "caption": [("GET MOGGED", 1), ("MOGGED BY BRAINROT LABS", 1), (None, 1)]}
     import random
-    seen = {mq.pick_tag(tags, random.Random(i)) for i in range(60)}
-    assert seen == {None, "GET MOGGED", "MOGGED BY BRAINROT LABS"}
+    rng = random.Random(3)
+    draws = [mq.draw_traits(t, rng) for _ in range(300)]
+    assert {d["frame_text"] for d in draws} == {"PIT VIPER", None}
+    assert {d["caption"] for d in draws} == {"GET MOGGED", "MOGGED BY BRAINROT LABS", None}
+    plain = sum(1 for d in draws if d["frame_text"] is None and d["caption"] is None)
+    assert 20 < plain < 80                                          # ~1/6 fully plain glasses
+    only_pv = mq.validate_traits({**TRAITS, "frame_text": [{"value": "PIT VIPER", "weight": 1},
+                                                           {"value": None, "weight": 0}]})
+    assert all(mq.draw_traits(only_pv, rng)["frame_text"] == "PIT VIPER" for _ in range(20))
 
 
-def test_item_records_tag_and_no_tag_means_untouched_image():
-    class Fixed:
-        def __init__(self, v): self.v = v
-        def choice(self, seq): return self.v
-    for choice in (None, "MOGGED BY BRAINROT LABS"):
-        ed = Editor()
+class Fixed:
+    """First draw returns the given traits; any later draw flips them, so a redraw shows up."""
+    def __init__(self, frame, caption): self.v, self.n = {"frame": frame, "caption": caption}, 0
+    def choices(self, seq, weights=None):
+        self.n += 1
+        want = self.v["frame"] if "PIT VIPER" in seq else self.v["caption"]
+        if self.n > 2:
+            want = next(x for x in seq if x != want)
+        return [want]
+
+
+def test_traits_drawn_once_per_mog_recorded_and_sent_to_editor():
+    for frame, caption in ((None, None), ("PIT VIPER", "GET MOGGED"), (None, "MOGGED BY BRAINROT LABS")):
+        ed = SameEditor(succeed_on=2)                                     # one retry: traits must not change
         store = Store(clock=Clock()); store.put("kill", True)
-        f = mq.MogMeFlow(store, load(), X(), ed, tempfile.mkdtemp(), fetch=Fetch(), clock=Clock(), rng=Fixed(choice))
-        f.handle(mention(1))
-        it = f.get("1")
-        assert it["tag"] == choice
-        raw = Path(it["image_path"]).read_bytes()
-        assert (raw == png((512, 512), (250, 250, 250))) is (choice is None)
+        f = mq.MogMeFlow(store, load(), X(), ed, tempfile.mkdtemp(), fetch=Fetch(), clock=Clock(),
+                         rng=Fixed(frame, caption))
+        assert f.handle(mention(1))[0] == "mog_me_queued"
+        tr = f.get("1")["traits"]
+        assert (tr["frame_text"], tr["caption"]) == (frame, caption)
+        assert len(tr["palette"]) >= 1 and all(c.startswith("#") and len(c) == 7 for c in tr["palette"])
+        assert ed.traits_seen[0] == ed.traits_seen[1] == tr
+        raw = Path(f.get("1")["image_path"]).read_bytes()
+        assert (raw == png((512, 512), (250, 250, 250))) is (caption is None)
+
+
+def test_prompt_carries_frame_text_palette_and_fit_check():
+    pal = ["#5a5ac8", "#ff2e93", "#f0f0f0"]
+    plain = mq.compose_prompt({"frame_text": None, "palette": pal})
+    assert plain.startswith(mq.VIPERS_PROMPT) and "#5a5ac8, #ff2e93, #f0f0f0" in plain
+    assert mq.PLACEMENT_PROMPT in plain and "PIT VIPER" not in plain
+    pv = mq.compose_prompt({"frame_text": "PIT VIPER", "palette": pal})
+    assert pv.startswith(mq.VIPERS_LOGO_PROMPT) and mq.NO_TEXT_SENTENCE not in pv
+    gm = mq.compose_prompt({"frame_text": "GET MOGGED", "palette": []})
+    assert "Put the GET MOGGED lettering" in gm and "Colour match" not in gm
+    assert mq.refs_prompt({"frame_text": None}) == mq.REFS_PROMPT
+    assert mq.refs_prompt({"frame_text": "PIT VIPER"}) == mq.REFS_LOGO_PROMPT
+    assert "the GET MOGGED lettering" in mq.refs_prompt({"frame_text": "GET MOGGED"})
+
+
+def test_gemini_request_uses_the_mogs_traits():
+    import base64
+    sent = []
+
+    def post(url, json, timeout, headers):
+        sent.append(json["contents"][0]["parts"]); return 200, {"candidates": [{"content": {"parts": [
+            {"inlineData": {"data": base64.b64encode(png()).decode()}}]}}]}
+    ed = mq.GeminiEditor("fixture-only", post=post, refs=[png((64, 64))])
+    tr = {"frame_text": "PIT VIPER", "caption": None, "palette": ["#112233"]}
+    ed.edit_pfp(jpeg(), traits=tr)
+    assert sent[0][0]["text"] == mq.compose_prompt(tr) and sent[0][2]["text"] == mq.REFS_LOGO_PROMPT
+
+
+def test_palette_of_picks_the_pictures_own_colours():
+    im = Image.new("RGB", (200, 200), (20, 120, 40))
+    Image.Image.paste(im, (230, 30, 30), (0, 0, 200, 60))
+    b = io.BytesIO(); im.save(b, "PNG")
+    pal = [tuple(int(h[i:i + 2], 16) for i in (1, 3, 5)) for h in mq.palette_of(b.getvalue())]
+    assert len(pal) == 2
+    assert any(abs(c[0] - 20) + abs(c[1] - 120) + abs(c[2] - 40) < 30 for c in pal)
+    assert any(abs(c[0] - 230) + abs(c[1] - 30) + abs(c[2] - 30) < 30 for c in pal)
+
+
+def test_caption_coloured_from_palette():
+    out = mq.add_tag(png((512, 512), (0, 0, 0)), "GET MOGGED", ["#1e5028", "#f0e650"])
+    img = Image.open(io.BytesIO(out)).convert("RGB")
+    corner = {img.getpixel((x, y)) for x in range(380, 510, 3) for y in range(470, 505, 3)}
+    from collections import Counter
+    fill = Counter(img.getpixel((x, y)) for x in range(380, 510, 2) for y in range(470, 505, 2)).most_common(1)[0][0]
+    assert fill == (30, 80, 40)                                         # box = darkest picture colour
+    assert any(abs(c[0] - 240) + abs(c[1] - 230) + abs(c[2] - 80) < 60 for c in corner)   # ink = contrast colour
 
 
 def test_tag_stays_in_bottom_corner_off_center():
@@ -685,39 +770,3 @@ def test_policy_ships_five_with_ten_ceiling_and_logs_budget_hits():
     store.put(f"mogme_spend:{f.day()}", "4.99")
     assert f.handle(mention(1)) == ("ignored", "budget")
     assert store.ledger("mogme_budget_hit")
-
-
-def test_frame_logo_is_random_per_edit_and_recorded():
-    import base64, random
-    sent = []
-
-    def post(url, json, timeout, headers):
-        sent.append(json["contents"][0]["parts"]); return 200, {"candidates": [{"content": {"parts": [
-            {"inlineData": {"data": base64.b64encode(png((512, 512), (250, 250, 250))).decode()}}]}}]}
-    refs = [png((64, 64))]
-    for odds, want in ((0, mq.VIPERS_PROMPT), (1, mq.VIPERS_LOGO_PROMPT)):
-        ed = mq.GeminiEditor("fixture-only", post=post, refs=refs, logo_odds=odds)
-        ed.edit_pfp(jpeg())
-        assert sent[-1][0]["text"] == want
-        assert sent[-1][2]["text"] == (mq.REFS_LOGO_PROMPT if odds else mq.REFS_PROMPT)
-    assert "PIT VIPER logo" in mq.VIPERS_LOGO_PROMPT and "No text" not in mq.VIPERS_LOGO_PROMPT
-    ed = mq.GeminiEditor("fixture-only", post=post, logo_odds=0.5, rng=random.Random(7))
-    seen = set()
-    for _ in range(30):
-        ed.edit_pfp(jpeg()); seen.add(ed.last_variant)
-    assert seen == {"logo", "plain"}
-    store = Store(clock=Clock()); store.put("kill", True)
-    ed1 = mq.GeminiEditor("fixture-only", post=post, logo_odds=1)
-    f = mq.MogMeFlow(store, load(), X(), ed1, tempfile.mkdtemp(), fetch=Fetch(), clock=Clock())
-    f.handle(mention(1))
-    assert f.get("1")["frame_logo"] is True
-
-
-@pytest.mark.parametrize("odds", ["-0.1", "1.5", "lots", None])
-def test_bad_logo_odds_refuse_boot(odds):
-    with pytest.raises(mq.MogMeConfigError):
-        mq.build_editor({"IMAGE_EDITOR": "gemini", "GEMINI_API_KEY": "fixture-only"}, logo_odds=odds)
-
-
-def test_policy_logo_odds_half():
-    assert mq.check_odds(load().raw["mog_me"]["frame_logo_odds"]) == 0.5

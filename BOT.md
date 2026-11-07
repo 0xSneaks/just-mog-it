@@ -11,10 +11,13 @@ DeepSeek pair evaluator (`bot/live/deepseek.py`, `deepseek-flash`) is connected 
 **"mog me" on X** (`bot/mogme_queue.py`):
 - **Who gets mogged:** only the mention author, using their own PFP.
 - **Eligibility:** ≥ 60 followers, a checkmark, and following @justmogit_bot; otherwise a silent skip.
-- **Editor:** `IMAGE_EDITOR=stub` (the default; never postable) or `gemini` (needs `GEMINI_API_KEY`). The Gemini prompt is a verbatim copy of justmogit-site `api/mog.js` `vipers`: wraparound shield sport shades in the input's own art style, fitted to the face, colours from its palette. The PIT VIPER frame logo is random per mog (`mog_me.frame_logo_odds` 0.5); the other half have no text on the frames.
+- **Editor:** `IMAGE_EDITOR=stub` (the default; never postable) or `gemini` (needs `GEMINI_API_KEY`). The Gemini prompt is a verbatim copy of justmogit-site `api/mog.js` `vipers`: wraparound shield sport shades in the input's own art style, fitted to the face, colours from its palette. **Traits, NFT-style,** are drawn once per mog from `mog_me.traits` and saved with the item:
+- frame lettering: PIT VIPER, or plain glasses
+- corner caption: GET MOGGED, MOGGED BY BRAINROT LABS, or none
+
+Colour match: the picture's own palette (median-cut hex colours) goes into the prompt for the frames and lenses, and the caption box and ink use it too. A fit checklist covers lenses over the eyes, the brow line, face width, tilt and turn, and never covering the nose or mouth. `mogme-list` shows trait counts.
 - **Before the edit:** avatars under 512 px are upscaled to 1024. Up to 3 owner-approved style references go along with each edit; `mogme-ref ID` adds one.
 - **No-change check:** if under 6% of pixels changed, the try counts as a fail. There are at most 2 retries, then a polite text draft. Every try is billed.
-- **Tag:** none, or one line from `mog_me.tags` at random, in the bottom corner.
 - **Owner decisions:** approve and reject both need a short reason, which is saved with the item.
 - **Budget:** mog-me has its own $5.00/day, separate from the $0.30 launch-reply budget. That is 72 mogs/day if every one works on the first try, or 34 if every one needs all 3 tries.
 - **Posting:** `mogme-post` posts only APPROVED gemini items, and only with the kill switch OFF. Autopost is off.
