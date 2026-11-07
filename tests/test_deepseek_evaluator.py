@@ -16,7 +16,7 @@ from bot.policy import load
 from bot.store import Store
 from mogit.guard import b58
 
-BASE, CURRENT, OTHER = (b58(bytes([n]) * 32) for n in (21, 22, 23))
+BASE, CURRENT, OTHER, UNAPPROVED = (b58(bytes([n]) * 32) for n in (21, 22, 23, 24))
 PAIR = ResolvedPair(BASE, CURRENT, OTHER, "bonding_curve", "stablecoin", 100)
 CONTEXT = PairContext(
     "fixture narrative", "", (QuoteCandidate(CURRENT, "stablecoin"), QuoteCandidate(WRAPPED_SOL, "crypto")),
@@ -48,13 +48,13 @@ def setup(monkeypatch):
     return evaluate, client, meta, sleep
 
 
-@pytest.mark.parametrize("action,quote", [("keep", CURRENT), ("relaunch", WRAPPED_SOL), ("reject", CURRENT)])
+@pytest.mark.parametrize("action,quote", [("keep", CURRENT), ("relaunch", WRAPPED_SOL), ("reject", None)])
 def test_happy_paths_and_request_shape(setup, action, quote):
     evaluate, client, _, _ = setup
     raw = decision(action=action, selected_quote_mint=quote, confidence=1, risk_flags=["ignored"])
     client.post.return_value = completion(raw)
     assert evaluate(PAIR, CONTEXT) == EvaluatorResult(
-        action, raw["reason"], BASE, None if action == "reject" else quote,
+        action, raw["reason"], BASE, quote,
     )
     args, kwargs = client.post.call_args
     assert args == ("https://api.deepseek.com/chat/completions",)
@@ -67,24 +67,24 @@ def test_happy_paths_and_request_shape(setup, action, quote):
     assert {row["mint"] for row in body["candidates"]} == {CURRENT, WRAPPED_SOL}
 
 
-@pytest.mark.parametrize("raw,reason", [
-    (decision(target_mint=OTHER), "target_mint"),
-    (decision(action="relaunch", selected_quote_mint=OTHER), "outside candidate set"),
-    (decision(action="relaunch", selected_quote_mint=[]), "outside candidate set"),
+@pytest.mark.parametrize("raw", [
+    decision(action="relaunch", target_mint=OTHER, selected_quote_mint=WRAPPED_SOL),
+    decision(action="relaunch", selected_quote_mint=OTHER),
+    decision(selected_quote_mint=WRAPPED_SOL),
+    decision(action="reject"),
 ])
-def test_model_overrides_are_rejected(setup, raw, reason):
+def test_model_decision_reaches_policy_without_rewrites(setup, raw):
     evaluate, client, _, _ = setup
     client.post.return_value = completion(raw)
-    result = evaluate(PAIR, CONTEXT)
-    assert result.action == "reject" and result.target_mint == BASE and result.selected_quote_mint is None
-    assert reason in result.reason
+    assert evaluate(PAIR, CONTEXT) == EvaluatorResult(**raw)
 
 
 @pytest.mark.parametrize("response", [
     completion(content="not json"),
     completion(content="[]"),
     completion(decision(), finish_reason="length"),
-    completion(decision(selected_quote_mint=WRAPPED_SOL)),
+    completion(decision(target_mint=None)),
+    completion(decision(selected_quote_mint=[])),
     completion(decision(reason="x" * 281)),
     completion({key: value for key, value in decision().items() if key != "selected_quote_mint"}),
     completion(decision(action="ask")),
@@ -92,8 +92,9 @@ def test_model_overrides_are_rejected(setup, raw, reason):
 def test_parse_failures_are_typed_without_retry(setup, response):
     evaluate, client, _, sleep = setup
     client.post.return_value = response
-    with pytest.raises(deepseek.PairDecisionParseError):
+    with pytest.raises(deepseek.PairEvaluatorError) as exc:
         evaluate(PAIR, CONTEXT)
+    assert exc.value.kind == "parse"
     client.post.assert_called_once()
     sleep.assert_not_called()
 
@@ -103,15 +104,17 @@ def test_missing_metadata_blocks_model_call(setup, field):
     evaluate, client, meta, _ = setup
     ctx = replace(CONTEXT, liquidity=None) if field == "liquidity_usd" else CONTEXT
     meta.return_value = {key: value for key, value in META.items() if key != field}
-    with pytest.raises(deepseek.MissingMetadataError, match=field):
+    with pytest.raises(deepseek.PairEvaluatorError, match=field) as exc:
         evaluate(PAIR, ctx)
+    assert exc.value.kind == "missing_metadata"
     client.post.assert_not_called()
 
 
 def test_empty_candidates_block_model_call(setup):
     evaluate, client, meta, _ = setup
-    with pytest.raises(deepseek.UnsupportedQuoteError):
+    with pytest.raises(deepseek.PairEvaluatorError) as exc:
         evaluate(PAIR, replace(CONTEXT, candidates=()))
+    assert exc.value.kind == "no_candidates"
     client.post.assert_not_called()
     meta.assert_not_called()
 
@@ -120,8 +123,9 @@ def test_empty_candidates_block_model_call(setup):
 def test_auth_failure_is_not_retried(setup, status):
     evaluate, client, _, sleep = setup
     client.post.return_value = httpx.Response(status)
-    with pytest.raises(deepseek.DeepSeekAuthError):
+    with pytest.raises(deepseek.PairEvaluatorError) as exc:
         evaluate(PAIR, CONTEXT)
+    assert exc.value.kind == "auth"
     client.post.assert_called_once()
     sleep.assert_not_called()
 
@@ -138,39 +142,54 @@ def test_429_then_success(setup):
 def test_rate_limit_is_bounded_and_typed(setup, retry_after, attempts, waits):
     evaluate, client, _, sleep = setup
     client.post.return_value = httpx.Response(429, headers={"Retry-After": retry_after})
-    with pytest.raises(deepseek.DeepSeekRateLimited):
+    with pytest.raises(deepseek.PairEvaluatorError) as exc:
         evaluate(PAIR, CONTEXT)
+    assert exc.value.kind == "rate_limited"
     assert client.post.call_count == attempts
     assert sleep.call_count == waits
 
 
-@pytest.mark.parametrize("failure", [httpx.Response(503), httpx.ConnectError("offline")])
-def test_unavailable_retried_once(setup, failure):
+def test_server_error_retried_once(setup):
     evaluate, client, _, sleep = setup
-    client.post.side_effect = [failure, failure]
-    with pytest.raises(deepseek.DeepSeekUnavailable):
+    client.post.return_value = httpx.Response(503)
+    with pytest.raises(deepseek.PairEvaluatorError) as exc:
         evaluate(PAIR, CONTEXT)
+    assert exc.value.kind == "unavailable"
     assert client.post.call_count == 2
     sleep.assert_called_once_with(1.0)
 
 
-def test_timeout_is_not_retried(setup):
+@pytest.mark.parametrize("failure,kind", [
+    (httpx.ReadTimeout("offline"), "timeout"),
+    (httpx.ConnectError("offline"), "unavailable"),
+])
+def test_transport_failures_are_not_retried(setup, failure, kind):
     evaluate, client, _, sleep = setup
-    client.post.side_effect = httpx.ReadTimeout("offline")
-    with pytest.raises(deepseek.DeepSeekTimeout):
+    client.post.side_effect = failure
+    with pytest.raises(deepseek.PairEvaluatorError) as exc:
         evaluate(PAIR, CONTEXT)
+    assert exc.value.kind == kind
     client.post.assert_called_once()
     sleep.assert_not_called()
 
 
-@pytest.mark.parametrize("status,action,reason", [(200, "keep", "narrative_fit"), (401, "reject", "pair_review_failed")])
-def test_factory_injects_into_engine_and_preserves_preview_wall(monkeypatch, status, action, reason):
+@pytest.mark.parametrize("response,action,reason", [
+    (completion(decision()), "keep", "narrative_fit"),
+    (httpx.Response(401), "reject", "pair_review_failed"),
+    (completion(decision(target_mint=OTHER)), "reject", "target_mismatch"),
+    (completion(decision(action="relaunch", selected_quote_mint=OTHER)), "reject", "quote_not_supported"),
+    (completion(decision(action="relaunch", selected_quote_mint=UNAPPROVED)),
+     "reject", "quote_not_approved_for_narrative"),
+    (completion(decision(selected_quote_mint=WRAPPED_SOL)), "reject", "keep_quote_mismatch"),
+    (completion(decision(action="reject")), "reject", "invalid_decision"),
+])
+def test_factory_injects_into_engine_and_preserves_preview_wall(monkeypatch, response, action, reason):
     monkeypatch.setenv("DEEPSEEK_API_KEY", "fixture-only")
     monkeypatch.setenv("DEEPSEEK_MODEL", "fixture-model")
     client = Mock()
-    client.post.return_value = completion(decision()) if status == 200 else httpx.Response(status)
+    client.post.return_value = response
     resolver = Mock(resolve_pair=Mock(return_value=PAIR))
-    registry = Mock(refresh=Mock(return_value=CONTEXT.candidates))
+    registry = Mock(refresh=Mock(return_value=(*CONTEXT.candidates, QuoteCandidate(UNAPPROVED, "crypto"))))
     preview = deepseek.build_deepseek_preview(
         resolver, registry, lambda _: CONTEXT, metadata=lambda *_: META, client=client,
     )

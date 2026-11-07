@@ -29,47 +29,23 @@ make no promises about price, backing or payouts.
 """
 
 
-class DeepSeekError(RuntimeError):
+class PairEvaluatorError(RuntimeError):
     """PairPreview catches this as a failed preview."""
 
-
-class MissingMetadataError(DeepSeekError):
-    pass
-
-
-class UnsupportedQuoteError(DeepSeekError):
-    pass
-
-
-class DeepSeekAuthError(DeepSeekError):
-    pass
-
-
-class DeepSeekRateLimited(DeepSeekError):
-    pass
-
-
-class DeepSeekUnavailable(DeepSeekError):
-    pass
-
-
-class DeepSeekTimeout(DeepSeekError):
-    pass
-
-
-class PairDecisionParseError(DeepSeekError):
-    pass
+    def __init__(self, kind: str, detail: str = ""):
+        super().__init__(f"{kind}: {detail}" if detail else kind)
+        self.kind = kind
 
 
 def _nonnegative_number(value, field):
     if value is None or isinstance(value, bool):
-        raise MissingMetadataError(field)
+        raise PairEvaluatorError("missing_metadata", field)
     try:
         number = Decimal(str(value))
     except InvalidOperation:
-        raise MissingMetadataError(field) from None
+        raise PairEvaluatorError("missing_metadata", field) from None
     if not number.is_finite() or number < 0:
-        raise MissingMetadataError(field)
+        raise PairEvaluatorError("missing_metadata", field)
     return str(number)
 
 
@@ -92,22 +68,22 @@ def _retry_after(value, default):
 class DeepSeekEvaluator:
     def __init__(self, *, api_key, metadata, model=DEFAULT_MODEL, timeout_s=12.0, client=None):
         if not api_key or not api_key.strip():
-            raise DeepSeekAuthError("API key missing")
+            raise PairEvaluatorError("auth", "API key missing")
         self._api_key = api_key
         self._metadata = metadata
         self._model = model
         self._timeout_s = timeout_s
         self._post = httpx.post if client is None else client.post
 
-    def __call__(self, pair, context):
+    def __call__(self, pair, context) -> EvaluatorResult:
         """The metadata callback supplies holders, volume_24h and age_s."""
         if not context.candidates:
-            raise UnsupportedQuoteError("no eligible quote candidates")
+            raise PairEvaluatorError("no_candidates")
         liquidity = context.liquidity.usd if context.liquidity is not None else None
         liquidity_usd = _nonnegative_number(liquidity, "liquidity_usd")
         meta = self._metadata(pair, context)
         if not isinstance(meta, Mapping):
-            raise MissingMetadataError("pair metadata")
+            raise PairEvaluatorError("missing_metadata", "pair metadata")
         payload = {
             "pair": {name: getattr(pair, name) for name in
                      ("base_mint", "quote_mint", "pool", "venue", "quote_class")},
@@ -123,20 +99,15 @@ class DeepSeekEvaluator:
         }
         raw = self._chat(payload)
         if not isinstance(raw, dict) or any(field not in raw for field in FIELDS):
-            raise PairDecisionParseError("missing decision fields")
+            raise PairEvaluatorError("parse", "missing decision fields")
         action, reason, target, quote = (raw[field] for field in FIELDS)
         if action not in ("keep", "relaunch", "reject"):
-            raise PairDecisionParseError("invalid decision action")
+            raise PairEvaluatorError("parse", "invalid decision action")
         if not isinstance(reason, str) or not reason.strip() or len(reason) > 280:
-            raise PairDecisionParseError("invalid decision reason")
-        if target != pair.base_mint:
-            return EvaluatorResult("reject", "model rewrote target_mint", pair.base_mint, None)
-        if action == "reject":
-            return EvaluatorResult(action, reason, target, None)
-        if action == "keep" and quote != pair.quote_mint:
-            raise PairDecisionParseError("keep quote differs from the current quote")
-        if not isinstance(quote, str) or quote not in {row.mint for row in context.candidates}:
-            return EvaluatorResult("reject", "model selected quote outside candidate set", target, None)
+            raise PairEvaluatorError("parse", "invalid decision reason")
+        if not isinstance(target, str) or (quote is not None and not isinstance(quote, str)):
+            raise PairEvaluatorError("parse", "invalid mint field type")
+        # PairPreview applies the mint and action policy to these exact values.
         return EvaluatorResult(action, reason, target, quote)
 
     def _chat(self, payload):
@@ -151,7 +122,7 @@ class DeepSeekEvaluator:
                 {"role": "user", "content": json.dumps(payload, separators=(",", ":"))},
             ],
         }
-        retried_unavailable = False
+        retried_server_error = False
         for attempt in range(3):
             try:
                 response = self._post(
@@ -159,12 +130,11 @@ class DeepSeekEvaluator:
                     json=request, timeout=self._timeout_s, follow_redirects=False,
                 )
             except httpx.TimeoutException:
-                raise DeepSeekTimeout("request timed out") from None
+                raise PairEvaluatorError("timeout", "request timed out") from None
             except httpx.TransportError:
-                status = None
-            else:
-                status = response.status_code
+                raise PairEvaluatorError("unavailable", "transport error") from None
 
+            status = response.status_code
             if status == 200:
                 try:
                     choice = response.json()["choices"][0]
@@ -172,20 +142,20 @@ class DeepSeekEvaluator:
                         raise ValueError("incomplete response")
                     return json.loads(choice["message"]["content"])
                 except (IndexError, KeyError, TypeError, ValueError):
-                    raise PairDecisionParseError("invalid completion JSON") from None
+                    raise PairEvaluatorError("parse", "invalid completion JSON") from None
             if status in (401, 403):
-                raise DeepSeekAuthError(f"HTTP {status}")
+                raise PairEvaluatorError("auth", f"HTTP {status}")
             if status == 429:
                 delay = _retry_after(response.headers.get("Retry-After"), 2 ** attempt)
                 if attempt == 2 or delay > MAX_RETRY_DELAY:
-                    raise DeepSeekRateLimited("HTTP 429")
-            elif status is None or 500 <= status < 600:
-                if retried_unavailable or attempt == 2:
-                    raise DeepSeekUnavailable("transport error" if status is None else f"HTTP {status}")
-                retried_unavailable = True
+                    raise PairEvaluatorError("rate_limited", "HTTP 429")
+            elif 500 <= status < 600:
+                if retried_server_error or attempt == 2:
+                    raise PairEvaluatorError("unavailable", f"HTTP {status}")
+                retried_server_error = True
                 delay = 1.0
             else:
-                raise DeepSeekUnavailable(f"HTTP {status}")
+                raise PairEvaluatorError("unavailable", f"HTTP {status}")
             time.sleep(delay)
 
 
