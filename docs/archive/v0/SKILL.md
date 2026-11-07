@@ -1,3 +1,5 @@
+> **SUPERSEDED (2026-11-07).** v0 document, archived unchanged below this header. Current: [BUILD-SPEC-v2.md](../../../BUILD-SPEC-v2.md) and [BOT.md](../../../BOT.md); front door: [README.md](../../../README.md).
+
 ---
 name: mogit
 description: Launch a coin on Mogz.fun (Solana memecoin launchpad) through a gated, human-confirmed flow. Trigger when the user types /mogit or explicitly asks to launch a coin on Mogz. A bare "launch a coin/token" with no venue named does NOT trigger this skill — ask which venue instead.
