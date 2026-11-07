@@ -8,7 +8,7 @@ from contextlib import contextmanager
 LAMPORTS = 1_000_000_000
 LIVE = ("RECEIVED", "DEDUPED", "GATED", "SPELLING_PENDING", "PAYMENT_PENDING", "STAGED", "QUEUED",
         "RESERVED", "ARMED", "SIGNED", "SENT", "UNKNOWN", "CONFIRMED", "REPLIED")
-TERMINAL = ("LEDGERED", "REJECTED", "FAILED", "EXPIRED", "CANCELLED", "REPLY_ESCALATED")
+TERMINAL = ("LEDGERED", "REJECTED", "FAILED", "EXPIRED", "CANCELLED", "REPLY_ESCALATED", "PAIR_REVIEWED")
 
 SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS jobs(
@@ -90,3 +90,30 @@ class Store:
         if kind:
             q, a = q + " WHERE kind=?", (kind,)
         return [dict(r) for r in self.db.execute(q + " ORDER BY id", a)]
+
+    def resolve_pair_review(self, job_id, mint, *, by, eligible_mints):
+        """Record an operator choice from the queued candidates and a fresh eligible set."""
+        if not by or mint not in eligible_mints:
+            raise ValueError("operator and current quote eligibility required")
+        with self.tx() as db:
+            request = db.execute(
+                "SELECT body FROM ledger WHERE kind='pair_review_request' AND job_id=?", (job_id,),
+            ).fetchone()
+            if request is None:
+                raise ValueError("no pending pair review")
+            prior = db.execute(
+                "SELECT 1 FROM ledger WHERE kind='pair_review_choice' AND job_id=?", (job_id,),
+            ).fetchone()
+            if prior:
+                raise ValueError("pair review already resolved")
+            data = json.loads(request["body"])
+            if mint not in {row["mint"] for row in data["candidates"]}:
+                raise ValueError("quote was not queued")
+            key = json.dumps([data["narrative"], data["venue"], data["underlying"]])
+            choice = {"mint": mint, "by": by, "job_id": job_id}
+            self.put(f"pair_review_choice:{key}", choice, db)
+            self.ledger_row("pair_review_choice", choice, job_id=job_id, db=db)
+
+    def pair_review_choice(self, narrative, venue, underlying):
+        key = json.dumps([narrative, venue, underlying])
+        return self.get(f"pair_review_choice:{key}")

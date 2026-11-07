@@ -30,11 +30,14 @@ class Refused(Exception):
         self.code, self.kw = code, kw
 
 class Engine:
-    def __init__(self, store, policy, adapters, clock=time.time, public=False):
+    def __init__(self, store, policy, adapters, clock=time.time, public=False, *, pair_preview=None):
+        if public and pair_preview is not None:
+            raise BootRefused("pair review is preview-only")
         self.s, self.p, self.a, self.clock = store, policy, adapters, clock
         self.budget = replies.Budget(store, policy, self.day)
         self.cap = fees.lamports(policy.cost_cap_sol)
         self.public = public
+        self.pair_preview = pair_preview
 
     # ---------------------------------------------------------------- boot / kill
     def boot(self):
@@ -109,6 +112,11 @@ class Engine:
             return ("ignored", None)
         if self.killed():
             return ("ignored", "kill")
+        if self.pair_preview is not None:
+            count = m.get("followers_count")
+            if (m.get("verified_type") not in ("blue", "business", "government")
+                    or type(count) is not int or count < 60):
+                return ("ignored", "author_gate")
         job_id = uuid.uuid4().hex[:16]
         now = self.clock()
         try:
@@ -158,12 +166,42 @@ class Engine:
             "('REJECTED','EXPIRED','CANCELLED')", (req, job_id, self.clock() - cool)).fetchone()
         if recent:
             return self._reject(job_id, "cooldown", reply=False)
+        if self.pair_preview is not None:
+            self._move(job_id, ("DEDUPED",), "GATED")
+            return self._preview_pair(job_id, pl["ca"])
         if self._launches_today() >= int(self.p.launches_per_day):
             return self._reject(job_id, "cap", cap=self.p.launches_per_day)
         if self.s.get("bankroll_available", 0) < self.cap:
             return self._reject(job_id, "bankroll")
         self._move(job_id, ("DEDUPED",), "GATED")
         return self.stage(job_id)
+
+    def _preview_pair(self, job_id, ca):
+        decision, context = self.pair_preview.review(ca)
+        reply = "Keeping this one. The current pair fits." if decision.action == "keep" else None
+        with self.s.tx() as db:
+            job = self.s.job(job_id)
+            if job["state"] != "GATED":
+                return (job["state"], None)
+            self._move(job_id, ("GATED",), "PAIR_REVIEWED", decision.reason, db)
+            self.s.ledger_row("pair_preview", {
+                "mention_id": job["source_tweet_id"],
+                "target_mint": ca,
+                "action": decision.action,
+                "reason": decision.reason,
+                "selected_quote_mint": decision.selected_quote_mint,
+                "reply_preview": reply,
+            }, job_id=job_id, db=db)
+            if decision.action == "ask":
+                self.s.ledger_row("pair_review_request", {
+                    "mention_id": job["source_tweet_id"],
+                    "target_mint": ca,
+                    "narrative": context.narrative,
+                    "underlying": context.underlying,
+                    "venue": "pump.fun",
+                    "candidates": [c.__dict__ for c in context.candidates],
+                }, job_id=job_id, db=db)
+        return ("PAIR_REVIEWED", decision.action)
 
     def _launches_today(self):
         """Holds/spends today PLUS jobs already queued toward a launch, so nobody is asked to
