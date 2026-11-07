@@ -36,7 +36,7 @@ rug:
 wrong_pair:
   min_pair_liquidity_sol: "0.5"     # ASSUMPTION — "effectively zero" needs an owner number
 
-description_prefix: "Rescue mog of ${ticker} — original CA {ca}. Not the original dev. NFA."
+description_prefix: "${ticker} was live on the wrong pair — not SOL. JustMogIt pulled the token's own picture and metadata and relaunched it paired with SOL. That's a mog. Original CA: {ca}."
 description_max_chars: 1000         # ASSUMPTION — set to pump.fun's real limit before go-live
 
 mogger:
