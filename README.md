@@ -8,6 +8,63 @@ MogIt is an agent skill: type `/mogit` and your agent walks a gated flow that en
 
 No auto-execute. No hype. Every launch is confirmed by a human, on pinned terms, against a hard lifetime budget.
 
+## X profile-picture bot v1.0.0
+
+The PFP bot reads mentions, checks that the author is verified and follows more
+than 60 accounts, and replies to clear mog requests with a Pit Viper edit of the
+author's profile picture. Gemini 2.5 Flash classifies the request and locates
+the glasses. The last processed mention is stored in `tmp/since_id.txt`.
+
+### API access and compliance
+
+- **X API access.** Under the legacy tier model, budget for Basic+ (about
+  $100/month). The legacy Free tier did not cover the complete mention polling
+  and media upload workflow. X now documents
+  [pay-per-use API credits](https://docs.x.com/x-api/getting-started/pricing).
+  Verify your app's access to mention polling, v1.1 media upload, and post
+  creation. Enable Read and Write for the OAuth 1.0a user credentials.
+- **Automation disclosure.** Enable the
+  [Automated account label](https://help.x.com/en/using-x/automated-account-labels)
+  and disclose in the bio that the bot edits and replies to profile-picture
+  requests. Get X's prior written approval for AI replies, publish an opt-out
+  route, and honor opt-outs before running the listener.
+  [X automation rules](https://help.x.com/en/rules-and-policies/x-automation)
+- **Gemini access.** Use an API key with access to
+  [Gemini 2.5 Flash](https://ai.google.dev/gemini-api/docs/models/gemini-2.5-flash).
+
+### Art assets
+
+Commit these transparent PNGs manually to `assets/`.
+
+- `pit_vipers_frame.png`
+- `pit_vipers_left_lens.png`
+- `pit_vipers_right_lens.png`
+- `high_fidelity_scanlines.png`
+- `get_mogged_stamp.png`
+
+The frame and two lens PNGs must use **identical canvas dimensions**, with each
+layer aligned in its final position on that canvas. The scanlines are masked
+to the glasses. The stamp occupies 30% of the profile picture width.
+
+### Setup
+
+From the repository root, in a shell with Python 3.10 or newer:
+
+```bash
+python -m pip install -r requirements.txt
+cp .env.example .env
+# Fill in all six variables in .env.
+set -a
+. ./.env
+set +a
+python -m pytest
+python -m mogit.bot
+```
+
+The tests create their own image fixtures and run without production art or API
+credentials. Run one listener per cursor file. If a reply request fails with an
+unknown outcome, check the original thread before restarting the listener.
+
 ## How /mogit works
 
 1. **Preflight, before any prompt.** The agent loads the budget ledger and reads the launch wallet's *actual* SOL balance and a real-time cost quote. If the wallet can't fund the launch or the budget can't cover it, the skill refuses on the spot — no prompts for a launch that cannot proceed.

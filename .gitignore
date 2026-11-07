@@ -34,6 +34,8 @@ __pycache__/
 *.pyc
 .cache/
 tmp/
+output/
+.pytest_cache/
 temp/
 
 # OS / editor
