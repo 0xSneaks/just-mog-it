@@ -12,6 +12,7 @@ from .spelling import lock
 
 SOCIAL_KEYS = ("twitter", "telegram", "website")
 BANNED_DESC = re.compile(r"\b(official|verified|the real|team token|airdrop)\b", re.I)
+RETIRED_DESC = re.compile(r"\bnot the original dev\b\.?|\bNFA\b\.?", re.I)  # owner ruling 2026-11-07: story-only copy
 
 class DossierError(Exception):
     pass
@@ -41,7 +42,7 @@ def _safe_social(url):
 
 def build_description(policy, ticker, ca, original):
     prefix = policy.description_prefix.replace("{ticker}", ticker).replace("{ca}", ca)
-    original = BANNED_DESC.sub("", (original or "")).strip()
+    original = RETIRED_DESC.sub("", BANNED_DESC.sub("", (original or ""))).strip()
     room = int(policy.description_max_chars) - len(prefix) - 1
     if room < 0:
         raise DossierError("description prefix alone exceeds description_max_chars")
