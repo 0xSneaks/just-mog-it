@@ -140,7 +140,7 @@ class TestHappyPath(unittest.TestCase):
         self.assertIn(mint, x.replies[-1][1]); self.assertNotIn("http", x.replies[-1][1])
         built = e.a.pump.built[0]
         self.assertEqual((built["name"], built["symbol"], built["dev_buy_sol"]), ("Bingus", "BINGUS", "0"))
-        self.assertTrue(built["description"].startswith("Rescue mog of $BINGUS"))
+        self.assertTrue(built["description"].startswith("$BINGUS was live on the wrong pair"))
 
 class TestGates(unittest.TestCase):
     def test_not_allowlisted_silent(self):
