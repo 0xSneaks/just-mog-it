@@ -53,3 +53,14 @@ Mogz create adapter: CANCELLED (owner ruling 2026-11-07, mogz is out). No venue 
 ## Tests
 
 `python3 -m pytest -q` → 266 passed (pass 2; clean venv with `pip install -r requirements.txt`). The new files are `tests/test_deepseek_timeout_ruling.py`, `tests/test_callout.py`, `tests/test_retired_disclaimer.py` and `TestLaunchMetadataReader` in `tests/test_bot_live.py`.
+
+
+## Pass 6: Codex P1 fix (CHANGES @ 78fb797, 2026-11-07 22:40 ET)
+
+| File | Lines | Change |
+|---|---|---|
+| `bot/mogme_queue.py` | `_amount`, `spent`, `_book`, `_room` | Every cost AND the stored `mogme_spend:<day>` must be a finite, non-negative str/int/Decimal. Floats, bools, None, NaN/sNaN, ±inf, malformed text and negatives are rejected. `spent()` raises on a corrupt record, never reading it as 0. `_book` validates both values before writing; on error nothing changes. `_room` returns False on any invalid value and logs `mogme_budget_invalid`, so intake makes no Gemini call and `post_ready` dispatches nothing. |
+| `bot/mogme_queue.py` | `handle` budget-hit log | Logs the raw stored value, so a corrupt record can't crash the refusal path. |
+| `bot/run.py` | `mogme-list` | Prints "CORRUPT" instead of crashing. |
+
+Regressions in `tests/test_mogme_queue.py` cover `_room`, `_book`, intake and `post_ready`, with negative, NaN, sNaN, ±inf, malformed, bool, None, float, zero, exact-budget and one-unit-over cases, plus Codex's exact repro. Mutation-checked. Suite: **575 passed** (clean venv too).

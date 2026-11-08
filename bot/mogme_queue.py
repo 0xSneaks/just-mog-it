@@ -527,15 +527,36 @@ class MogMeFlow:
         except (KeyError, TypeError, ValueError):
             raise MogMeConfigError("mog_me.min_changed_fraction missing") from None
 
+    @staticmethod
+    def _amount(value, name):
+        """A USD amount must be a finite, non-negative number (str/int/Decimal, never bool or
+        float noise). Anything else raises MogMeError: corrupt or hostile values never count."""
+        if isinstance(value, bool) or not isinstance(value, (str, int, Decimal)):
+            raise MogMeError(f"{name} is not a valid amount")
+        try:
+            return _usd(value, name)
+        except MogMeConfigError:
+            raise MogMeError(f"{name} is not a valid amount") from None
+
     def spent(self, day=None):
-        return Decimal(self.s.get(f"mogme_spend:{day or self.day()}", "0"))
+        """Today's mog-me spend. A corrupt stored value raises (fail closed), never reads as 0."""
+        return self._amount(self.s.get(f"mogme_spend:{day or self.day()}", "0"), "stored mog-me spend")
 
     def _book(self, usd, day=None):
+        """Validate the cost AND the stored spend before writing; on any error nothing changes."""
         k = f"mogme_spend:{day or self.day()}"
-        self.s.put(k, str(Decimal(self.s.get(k, "0")) + usd))
+        cost, current = self._amount(usd, "mog-me cost"), self.spent(day)
+        self.s.put(k, str(current + cost))
 
     def _room(self, usd, day=None):
-        return self.spent(day) + usd <= mogme_budget(self.p)
+        """True only when the cost and the stored spend are valid and fit the budget. Invalid
+        state refuses (False) with no mutation, so callers make no Gemini or X call."""
+        try:
+            cost, current = self._amount(usd, "mog-me cost"), self.spent(day)
+        except MogMeError:
+            self.s.ledger_row("mogme_budget_invalid", {"day": day or self.day()})
+            return False
+        return current + cost <= mogme_budget(self.p)
 
     def day(self):
         return datetime.fromtimestamp(self.clock(), timezone.utc).strftime("%Y-%m-%d")
@@ -569,7 +590,8 @@ class MogMeFlow:
         if int(self.s.get(f"mogme_count:{day}", 0)) >= cap:
             return ("ignored", "daily_cap")
         if not self._room(per, day):                     # mog-me's own budget, never the launch replies'
-            self.s.ledger_row("mogme_budget_hit", {"mention_id": mid, "spent": str(self.spent(day))})
+            self.s.ledger_row("mogme_budget_hit", {"mention_id": mid,
+                                                   "spent": str(self.s.get(f"mogme_spend:{day}", "0"))})
             return ("ignored", "budget")
         if not self._follows_bot(m, uid, day):           # last gate: may cost one user read
             return self._silent(mid, uid, "not_following")

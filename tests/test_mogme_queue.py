@@ -842,3 +842,93 @@ def test_only_named_approvers_can_decide():
     for bad in ([], None, [""], "muse"):
         with pytest.raises(mq.MogMeConfigError):
             flow(policy_over={"mog_me": {**load().raw["mog_me"], "approvers": bad}})
+
+
+# ================================================================== Codex P1 (PR #5 @ 78fb797): budget fail-closed
+BAD_AMOUNTS = [Decimal("-1"), Decimal("-0.000001"), "-5", Decimal("NaN"), Decimal("sNaN"), "nan",
+               Decimal("Infinity"), Decimal("-Infinity"), "inf", "abc", "", None, True, [1], {"x": 1}]
+
+
+@pytest.mark.parametrize("bad", BAD_AMOUNTS)
+def test_room_refuses_invalid_cost(bad):
+    f, store = flow()
+    assert f._room(bad) is False
+    assert store.get(f"mogme_spend:{f.day()}") is None              # no mutation
+
+
+@pytest.mark.parametrize("bad", BAD_AMOUNTS)
+def test_book_refuses_invalid_cost_without_mutation(bad):
+    f, store = flow()
+    store.put(f"mogme_spend:{f.day()}", "1.00")
+    with pytest.raises(mq.MogMeError):
+        f._book(bad)
+    assert store.get(f"mogme_spend:{f.day()}") == "1.00"
+
+
+@pytest.mark.parametrize("stored", ["-5", "-0.01", "NaN", "sNaN", "Infinity", "-Infinity", "abc", "", True, 1.5e400, [1]])
+def test_corrupt_stored_spend_refuses_room_book_intake_and_dispatch(stored):
+    x, ed = X(), Editor()
+    f, store = flow(x=x, editor=ed, kill=False)
+    f._save("123", "111", "user", None, "fixture")
+    f.approve("123", "sneaks", "fixture")
+    store.put(f"mogme_spend:{f.day()}", stored)
+    assert f._room(Decimal("0")) is False and f._room(Decimal("6")) is False
+    with pytest.raises(mq.MogMeError):
+        f._book(Decimal("0.01"))
+    with pytest.raises(mq.MogMeError):
+        f.spent()
+    assert f.handle(mention(1, author="222")) == ("ignored", "budget")   # intake refused, no Gemini call
+    assert ed.calls == []
+    assert f.post_ready() == [] and x.replies == [] and x.media == []   # no dispatch
+    assert f.get("123")["status"] == mq.APPROVED                        # nothing marked POSTING
+    assert store.get(f"mogme_spend:{f.day()}") == stored                # untouched
+
+
+def test_codex_repro_now_refused():
+    x = X()
+    f, s = flow(x=x, kill=False)
+    assert f._room(Decimal("-1")) is False
+    with pytest.raises(mq.MogMeError):
+        f._book(Decimal("-1"))
+    s.put("mogme_spend:" + f.day(), "-5")
+    assert f._room(Decimal("6")) is False
+    f._save("123", "111", "user", None, "fixture")
+    f.approve("123", "Sneaks", "fixture")
+    assert f.post_ready() == [] and x.replies == []
+
+
+def test_zero_and_exact_budget_boundaries():
+    f, store = flow()                                             # budget $5.00
+    assert f._room(Decimal("0")) is True
+    f._book(Decimal("0"))
+    assert f.spent() == Decimal("0")
+    assert f._room(Decimal("5.00")) is True                       # exactly the budget fits
+    assert f._room(Decimal("5.000001")) is False
+    f._book(Decimal("4.99"))
+    assert f._room(Decimal("0.01")) is True and f._room(Decimal("0.010001")) is False
+    f._book(Decimal("0.01"))
+    assert f.spent() == Decimal("5.00") and f._room(Decimal("0")) is True
+    assert f._room(Decimal("0.000001")) is False
+
+
+def test_exact_budget_post_dispatches_and_one_cent_over_does_not():
+    x = X(); f, store = flow(x=x, kill=False)
+    f.handle(mention(1)); f.approve("1", "sneaks", "good fit")
+    store.put(f"mogme_spend:{f.day()}", str(Decimal("5.00") - Decimal("0.015")))   # room for exactly one reply
+    assert f.post_ready() == [("1", "r1")]
+    assert Decimal(store.get(f"mogme_spend:{f.day()}")) == Decimal("5.00")
+    f2, s2 = flow(x=X(), kill=False)
+    f2.handle(mention(2, author="222")); f2.approve("2", "sneaks", "good fit")
+    s2.put(f"mogme_spend:{f2.day()}", "4.99")                      # 4.99 + 0.015 > 5.00
+    assert f2.post_ready() == [] and f2.get("2")["status"] == mq.APPROVED
+
+
+@pytest.mark.parametrize("bad", [0.1, 1.0, 0.0])
+def test_float_amounts_refused_no_float_noise(bad):
+    f, store = flow()
+    assert f._room(bad) is False
+    with pytest.raises(mq.MogMeError):
+        f._book(bad)
+    store.put(f"mogme_spend:{f.day()}", bad)
+    with pytest.raises(mq.MogMeError):
+        f.spent()

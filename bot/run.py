@@ -130,7 +130,11 @@ def mogme_cmd(cmd, args):
         return 0
     if cmd == "mogme-list":
         hits = sum(1 for r in store.ledger("mogme_budget_hit") if r["ts"] >= time.time() - 86_400)
-        print(f"mog-me spend today ${flow.spent()} of ${p.raw['mog_me']['daily_budget_usd']} "
+        try:
+            spend = f"${flow.spent()}"
+        except MogMeError:
+            spend = "CORRUPT (mog-me refuses all spending until fixed)"
+        print(f"mog-me spend today {spend} of ${p.raw['mog_me']['daily_budget_usd']} "
               f"(ceiling ${p.raw['mog_me']['daily_budget_max_usd']}); budget hits last 24h: {hits}")
         from collections import Counter
         tally = Counter(f"{k}={v}" for it in flow.items() for k, v in (it.get("traits") or {}).items()
