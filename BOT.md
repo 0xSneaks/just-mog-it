@@ -1,3 +1,49 @@
+# JustMogIt — what is built (2026-11-07)
+
+There are two separate paths in this repo. Neither has launched a coin. Launch #001 (mogz.fun) was made by hand through an external executor, not by this code.
+
+| Path | What it is | Status |
+|---|---|---|
+| `mogit/` | **Money core.** Lifetime $30 ledger cap, reserve-before-submit, tx guard (pinned to Meteora DBC), simulate-before-send, and hard gates in `mogit/gates.py`: kill switch (persisted, default ON), max 3 launches/UTC day, 0.025 SOL per-launch cap on simulated spend, SOL-only quote, first buy 0. | BUILT, offline. **No venue adapter.** The venue is pump.fun or Float, undecided (owner, 2026-11-07). mogz.fun is out. |
+| `bot/` | **X engine** (mentions → gates → dossier → reservation → fire → reply) plus the **pump.fun pipeline** (PumpPortal create, pump guard). | Logic BUILT offline with fake adapters. The pump.fun pipeline is SPECCED and has never launched. |
+
+DeepSeek pair evaluator (`bot/live/deepseek.py`, `deepseek-flash`) is connected and working. See Actions run 42407864926 (success/PASS) and `docs/DEEPSEEK-TIMEOUT.md`.
+**"mog me" on X** (`bot/mogme_queue.py`):
+- **Who gets mogged:** only the mention author, using their own PFP.
+- **Eligibility:** ≥ 60 followers, a checkmark, and following @justmogit_bot; otherwise a silent skip.
+- **Editor:** `IMAGE_EDITOR=stub` (the default; never postable) or `gemini` (needs `GEMINI_API_KEY`). The Gemini prompt is a verbatim copy of justmogit-site `api/mog.js` `vipers`: wraparound shield sport shades in the input's own art style, fitted to the face, colours from its palette. **Placement comes first** (`bot/mogme_pose.py`):
+1. Before the edit, one cheap gemini-2.5-flash call reads the head pose: front / three-quarter / profile (left or right), tilt in degrees, up/down, eye positions, art style, and whether the character already wears glasses.
+2. The prompt then gets pose-specific instructions:
+   - front: symmetric
+   - three-quarter: near lens bigger, far lens foreshortened behind the nose, only the near arm
+   - profile: one wraparound lens, arm straight back to the ear
+   - tilt: shades rotated by the same angle
+   - lens centres placed on the eye positions
+3. After each edit, a fit check asks whether the lenses sit over the eyes, follow the head angle, match the art style, and stay clear of the nose and mouth. A fail is a failed try (max 2 retries, then a polite text). If the check can't run, the item is queued with `fit_unchecked` for the owner.
+4. The stub reader (the default) makes no calls.
+
+**Traits, NFT-style,** are drawn once per mog from `mog_me.traits` and saved with the item:
+- frame lettering: PIT VIPER, or plain glasses
+- corner caption: GET MOGGED, MOGGED BY BRAINROT LABS, or none
+
+Colour match: the picture's own palette (median-cut hex colours) goes into the prompt for the frames and lenses, and the caption box and ink use it too. A fit checklist covers lenses over the eyes, the brow line, face width, tilt and turn, and never covering the nose or mouth. `mogme-list` shows trait counts.
+- **Before the edit:** avatars under 512 px are upscaled to 1024. Up to 3 owner-approved style references go along with each edit; `mogme-ref ID` adds one.
+- **No-change check:** if under 6% of pixels changed, the try counts as a fail. There are at most 2 retries, then a polite text draft. Every try is billed.
+- **Owner decisions:** approve and reject both need a short reason, which is saved with the item.
+- **Budget:** mog-me has its own $5.00/day, separate from the $0.30 launch-reply budget. That is 68 mogs/day if every one works on the first try, or 32 if every one needs all 3 tries.
+- **Posting:** `mogme-post` posts only APPROVED gemini items, and only with the kill switch OFF. Autopost is off.
+
+**Monday switch to Gemini:**
+1. Put `GEMINI_API_KEY` in the bot's runtime env.
+2. Set `IMAGE_EDITOR=gemini`.
+3. Run `python3 -m bot.run mogme-preview` once, then `python3 -m bot.run mogme-list`, and look at the PNG. Nothing posts.
+
+`bot/callout.py` (mogz.fun callouts) is parked with mogz. Do not extend it unless a venue decision revives mogz callouts.
+
+Run: `pip install -r requirements.txt && python3 -m pytest -q`
+
+---
+
 # MogIt bot core — grok-bot/builder (branch grok-bot/bot-core)
 
 Status: INTENT/VERIFIED-local. Core flow + 4 gates + mock tests. **No adapters wired, nothing can sign or send.**
@@ -11,7 +57,7 @@ Status: INTENT/VERIFIED-local. Core flow + 4 gates + mock tests. **No adapters w
 
 Pins: program `dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN` (Meteora DBC), discriminator `8c55d7b06636684f`, 16 accounts, launch wallet `2LYQUArY…sHvh7`… fixed idx 0,1,2,4,9–15.
 
-Run: `python3 -m unittest discover -s tests -v`
+Run: `python3 -m pytest -q`
 
 Open: surface (Sneaks decides), real adapters (muse's Mogz flow + vault `execution.sign_mogz`), real ledger file (muse holds it), image verifier. Review → claude-code before any live use.
 
@@ -39,7 +85,7 @@ Order: gates → dossier/eligibility → **then** ask for the 0.02 SOL fee → r
 
 Live adapters (`bot/live/`): X v2 (mentions, reply, chunked media upload), Solana RPC (simulate payer delta, dual send, status, blockhash expiry, PDA), PumpPortal trade-local create + collectCreatorFee with Pinata metadata, DAS + pump.fun + DexScreener dossier, Gemini inspection + eye landmarks, 0.02 SOL payment verifier (memo = job id, no replay), vault signer client. `bot/pumpguard.py` decodes the pump.fun create/buy/claim instructions and refuses anything else. Runner/console: `python3 -m bot.run` (loop --dry-run, status, approve, launch, kill, bankroll).
 
-Run: `python3 -m unittest discover -s tests -v` (131 OK: 67 money core + 64 bot).
+Run: `python3 -m pytest -q` (the full suite; see the top of this file).
 
 VERIFIED offline only — this build box can't reach X, Solana RPC, pump.fun, PumpPortal, Pinata or Gemini. PDA derivation VERIFIED against two real addresses (Meteora DBC + pump.fun event authorities). Discriminators VERIFIED by sha256 against published values.
 

@@ -9,12 +9,22 @@ reconcile step (expired blockhash + signature not found) releases it.
 FIX 4: check -> reserve -> settle runs under an exclusive flock on a sidecar lock
 file, so two sessions can never both pass the cap check for the same money."""
 import fcntl, json, os, tempfile, threading, uuid
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 CAP_USD = Decimal("30")
 
 class LedgerError(Exception):
     pass
+
+def validate_usd(value):
+    """Costs must be numeric, finite and non-negative at every entry point."""
+    try:
+        cost = Decimal(str(value))
+    except (TypeError, ValueError, InvalidOperation):
+        raise LedgerError("USD amount is invalid") from None
+    if not cost.is_finite() or cost < 0:
+        raise LedgerError("USD amount must be finite and non-negative")
+    return cost
 
 class _FileLock:
     """Exclusive flock guard for one Ledger. Re-entrant for the owning thread only,
@@ -56,30 +66,55 @@ class Ledger:
         try:
             with open(self.path) as f:
                 data = json.load(f)
-            spent = Decimal(str(data["spent_usd"]))
-            cap = Decimal(str(data.get("cap_usd", CAP_USD)))
+            spent = validate_usd(data["spent_usd"])
+            cap = validate_usd(data.get("cap_usd", CAP_USD))
         except (OSError, ValueError, KeyError) as e:
             raise LedgerError(f"ledger unreadable at {self.path}: {e}")
         if cap > CAP_USD:
             raise LedgerError("ledger cap above the $30 lifetime cap")
         pending = data.get("pending", [])
-        reserved = sum((Decimal(str(p["cost_usd"])) for p in pending), Decimal("0"))
+        reserved = sum((validate_usd(p.get("cost_usd")) for p in pending), Decimal("0"))
         return {"spent_usd": spent, "cap_usd": cap, "reserved_usd": reserved,
                 "remaining_usd": cap - spent - reserved,
-                "launches": data.get("launches", []), "pending": pending}
+                "launches": data.get("launches", []), "pending": pending,
+                "kill": data.get("kill")}  # raw; only exactly False means OFF (see kill_on)
 
     def _save(self, st, spent_usd, launches, pending):
         data = {"cap_usd": str(st["cap_usd"]), "spent_usd": str(spent_usd),
                 "launches": launches, "pending": pending}
+        if st.get("kill") is not None:
+            data["kill"] = st["kill"]  # persist the kill switch across every write
         d = os.path.dirname(os.path.abspath(self.path))
         fd, tmp = tempfile.mkstemp(dir=d, prefix=".ledger.")
         with os.fdopen(fd, "w") as f:
             json.dump(data, f, indent=2)
         os.replace(tmp, self.path)
 
+    def kill_on(self):
+        """Kill switch, persisted in the ledger file. ON unless the stored value is exactly
+        False: a missing key, any other value, or an unreadable ledger all mean ON."""
+        try:
+            return self.load()["kill"] is not False
+        except LedgerError:
+            return True
+
+    def set_kill(self, on):
+        with self.locked():
+            st = self.load()
+            st["kill"] = bool(on)
+            self._save(st, st["spent_usd"], st["launches"], st["pending"])
+            if self.kill_on() != bool(on):
+                raise LedgerError("ledger read-back mismatch on set_kill")
+            return bool(on)
+
+    def boot(self):
+        """Kill switch ON at boot (owner §0). The owner turns it OFF explicitly."""
+        return self.set_kill(True)
+
     def check(self, cost_usd):
+        cost_usd = validate_usd(cost_usd)
         st = self.load()
-        if Decimal(str(cost_usd)) > st["remaining_usd"]:
+        if cost_usd > st["remaining_usd"]:
             raise LedgerError(f"budget cap hit: need ${cost_usd}, remaining ${st['remaining_usd']}")
         return st
 
@@ -87,6 +122,7 @@ class Ledger:
         """FIX 3: write a PENDING reservation BEFORE submit. It counts against the cap
         (see load()) until settle() or release(). Returns the reservation id."""
         with self.locked():
+            cost_usd = validate_usd(cost_usd)
             st = self.check(cost_usd)
             rid = uuid.uuid4().hex
             entry = dict(record)
@@ -105,7 +141,7 @@ class Ledger:
             mine = [p for p in st["pending"] if p["id"] == rid]
             if not mine:
                 raise LedgerError(f"no pending reservation {rid} to settle")
-            new_spent = st["spent_usd"] + Decimal(str(mine[0]["cost_usd"]))
+            new_spent = st["spent_usd"] + validate_usd(mine[0].get("cost_usd"))
             rest = [p for p in st["pending"] if p["id"] != rid]
             self._save(st, new_spent, st["launches"] + [record], rest)
             if self.load()["spent_usd"] != new_spent:
@@ -142,6 +178,7 @@ class Ledger:
         """Direct spend write with no reservation (kept for non-flow callers).
         Atomic write, then read-back verify."""
         with self.locked():
+            cost_usd = validate_usd(cost_usd)
             st = self.check(cost_usd)
             new_spent = st["spent_usd"] + Decimal(str(cost_usd))
             self._save(st, new_spent, st["launches"] + [record], st["pending"])

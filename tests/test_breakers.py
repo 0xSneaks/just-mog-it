@@ -24,7 +24,8 @@ class M:
         self.tx = tx
         self.simr = sim if sim is not None else {"payer_lamports_delta": -20591640}
         self.ok = ok
-        self.q = {"sol": sol, "usd": usd, "mint": mint or "EarneMetyCsEqac2EEiLUh3VdR6bMre6cqM9rftNc6jB"}
+        self.q = {"sol": sol, "usd": usd, "mint": mint or "EarneMetyCsEqac2EEiLUh3VdR6bMre6cqM9rftNc6jB",
+                  "quote_mint": "So11111111111111111111111111111111111111112", "first_buy_lamports": 0}
         self.sent = []
         self.simulated = False
     def quote(self): return dict(self.q)
@@ -49,7 +50,7 @@ def make_ledger(spent="15.91", cap="30", launches=None, raw=None):
     if raw is not None:
         Path(p).write_text(raw)
     else:
-        data = {"cap_usd": cap, "spent_usd": spent}
+        data = {"cap_usd": cap, "spent_usd": spent, "kill": False}
         if launches is not None:
             data["launches"] = launches
         Path(p).write_text(json.dumps(data))
@@ -148,11 +149,12 @@ class Breakers(unittest.TestCase):
         L, _ = make_ledger(spent="28.07")
         with self.assertRaises(LedgerError):
             L.check("1.94")
-    def test_negative_spent_still_loads(self):
-        # document behavior: negative spent enlarges remaining — potential hole if ledger is writable by attacker
+    def test_negative_spent_refuses(self):
+        # Corrupt recorded spend must never enlarge the lifetime budget.
         L, _ = make_ledger(spent="-5")
-        st = L.load()
-        self.assertEqual(st["remaining_usd"], Decimal("35"))
+        with self.assertRaises(LedgerError):
+            L.load()
+        self.assertTrue(L.kill_on())
 
     # --- gate 3: pin every account + shape ---
     def test_each_pinned_account_tamper_refused(self):

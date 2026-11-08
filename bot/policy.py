@@ -14,7 +14,8 @@ REQUIRED = ["launches_per_day", "cost_cap_sol", "launch_fee_sol", "fee_split", "
             "pair_quote", "dev_buy_sol", "reply_budget_usd_per_day", "kill_switch_on_at_boot",
             "owner_approval_per_item", "x_reply_approval_ref", "claim_threshold_sol",
             "priority_fee_cap_sol", "mog_me_enabled", "venue", "allowlist", "rug", "wrong_pair",
-            "description_prefix", "description_max_chars", "mogger", "tiers", "limits", "x_prices_usd"]
+            "description_prefix", "description_max_chars", "mogger", "tiers", "limits", "x_prices_usd",
+            "mog_me"]
 
 @dataclass(frozen=True)
 class Policy:

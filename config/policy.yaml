@@ -21,6 +21,30 @@ claim_threshold_sol: "0.02"         # 0.13
 bankroll_seed_sol: "5"              # 0.14
 priority_fee_cap_sol: "0.005"       # 0.15
 mog_me_enabled: false               # 0.16 off until X media-upload 403 is fixed
+mog_me:                             # "mog me" X flow (bot/mogme_queue.py): owner approval queue
+  autopost: false                   # legacy flag; never bypasses approval or the kill switch. Owner only.
+  style: "vipers"                   # prompt: bot/mogme_queue.py VIPERS_PROMPT = justmogit-site api/mog.js vipers
+  approvers: ["sneaks", "muse"]     # owner 2026-11-07: no humans besides Sneaks; Muse is the bot's friendly voice
+                                    # and curates mog replies during testing. Nobody else can approve a post.
+  daily_budget_max_usd: "10.00"     # owner ceiling: "10 bucks a day if it becomes really popular". Raise
+                                    # daily_budget_usd to it by hand (mogme_budget_hit rows show demand).
+  daily_budget_usd: "5.00"          # owner 2026-11-07: mog-me's own $/day; every Gemini try, follow lookup
+                                    # and mog reply counts. Separate from reply_budget_usd_per_day (launch replies).
+  min_changed_fraction: "0.06"      # "no change" check: < 6% of pixels visibly changed = fail + retry (max 2).
+                                    # UNVERIFIED threshold; tune on real Gemini output.
+  traits:                           # NFT-style traits, drawn once per mog (weights = relative odds)
+    frame_text:                     # lettering on the frames, drawn by Gemini in the picture's style
+      - {value: "PIT VIPER", weight: 1}
+      - {value: null, weight: 1}    # plain glasses
+    caption:                        # small corner caption, coloured from the picture's palette
+      - {value: "GET MOGGED", weight: 1}
+      - {value: "MOGGED BY BRAINROT LABS", weight: 1}
+      - {value: null, weight: 1}
+  costs_usd:                        # per try / per mog; first-try cap = floor(daily_budget / sum incl. plain_post)
+    gemini_image: "0.039"           # UNVERIFIED: gemini-2.5-flash-image list price, 1290 output tokens x $30/1M
+    mention_read: "0.005"           # UNVERIFIED: X pay-per-use post read (BUILD-SPEC-v2 §3)
+    user_read: "0.010"              # UNVERIFIED: X pay-per-use user read (BUILD-SPEC-v2 §3)
+    pose_read: "0.002"              # UNVERIFIED: one gemini-2.5-flash vision call (pose read or fit check), conservative
 
 venue: pump.fun                     # owner 2026-11-04: pump.fun only
 

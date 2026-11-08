@@ -22,22 +22,30 @@ class XClient:
         """Mentions of the bot, oldest first, with quoted-tweet text and author handle joined in.
         Returns (mentions, newest_id)."""
         q = {"max_results": "100", "expansions": "author_id,referenced_tweets.id",
-             "tweet.fields": "author_id,referenced_tweets,created_at", "user.fields": "username"}
+             "tweet.fields": "author_id,referenced_tweets,created_at", "user.fields": "username,profile_image_url,public_metrics,verified_type,connection_status"}
         if since_id:
             q["since_id"] = since_id
         r = self.http.json("GET", f"{API}/users/{self.bot_user_id}/mentions?{urllib.parse.urlencode(q)}",
                            headers=self._h())
         inc = r.get("includes", {})
         users = {u["id"]: u.get("username") for u in inc.get("users", [])}
+        byid = {u["id"]: u for u in inc.get("users", [])}
+        avatars = {k: u.get("profile_image_url") for k, u in byid.items()}
         tweets = {t["id"]: t.get("text", "") for t in inc.get("tweets", [])}
         out = []
         for t in reversed(r.get("data", [])):
             if t.get("author_id") == self.bot_user_id:
                 continue                                   # never react to ourselves
             quoted = next((x["id"] for x in t.get("referenced_tweets", []) if x["type"] == "quoted"), None)
+            refs = {x.get("type") for x in t.get("referenced_tweets", [])}
             out.append({"id": t["id"], "author_id": t["author_id"], "handle": users.get(t["author_id"]),
                         "text": t.get("text", ""), "quoted_tweet_id": quoted,
-                        "quoted_text": tweets.get(quoted) if quoted else None})
+                        "quoted_text": tweets.get(quoted) if quoted else None,
+                        "is_retweet": "retweeted" in refs,
+                        "profile_image_url": avatars.get(t["author_id"]),   # the AUTHOR's fields only
+                        "followers_count": (byid.get(t["author_id"], {}).get("public_metrics") or {}).get("followers_count"),
+                        "verified_type": byid.get(t["author_id"], {}).get("verified_type"),
+                        "connection_status": byid.get(t["author_id"], {}).get("connection_status")})
         return out, r.get("meta", {}).get("newest_id", since_id)
 
     def reply(self, tweet_id, text, media_ids=None, idempotency_key=None):
@@ -46,6 +54,15 @@ class XClient:
             body["media"] = {"media_ids": [str(m) for m in media_ids]}
         r = self.http.json("POST", f"{API}/tweets", headers=self._h(), json_body=body)
         return r["data"]["id"]
+
+    def connection_status(self, user_id):
+        """Relationship of user_id to the bot's own user token, e.g. ["followed_by"]."""
+        r = self.http.json("GET", f"{API}/users/{user_id}?user.fields=connection_status", headers=self._h())
+        return r["data"].get("connection_status") or []
+
+    def profile_image_url(self, user_id):
+        r = self.http.json("GET", f"{API}/users/{user_id}?user.fields=profile_image_url", headers=self._h())
+        return r["data"].get("profile_image_url")
 
     def profile_image(self, user_id):
         r = self.http.json("GET", f"{API}/users/{user_id}?user.fields=profile_image_url", headers=self._h())

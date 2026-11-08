@@ -6,13 +6,22 @@
   python3 -m bot.run launch JOB           arm + fire an approved job
   python3 -m bot.run kill on|off          kill switch (ON cancels every pre-send job)
   python3 -m bot.run bankroll SOL         set spendable bankroll (capped at the wallet's real balance)
+  python3 -m bot.run mogme-preview        read mentions once, render "mog me" previews into the queue (posts nothing)
+  python3 -m bot.run mogme-list [STATUS]  show the "mog me" approval queue
+  python3 -m bot.run mogme-approve ID NAME REASON...   owner yes, with a short reason
+  python3 -m bot.run mogme-reject ID NAME REASON...    wrong size / off the eyes / wrong angle /
+                                          style mismatch / flat overlay / other[: note]
+  python3 -m bot.run mogme-ref ID         copy an APPROVED gemini mog into the style-reference folder
+  python3 -m bot.run mogme-post           post APPROVED items (refused while the kill switch is ON)
 
 --dry-run: reads X and Solana, posts nothing (replies printed), no vault → nothing can sign.
 Live mode refuses to boot without policy x_reply_approval_ref (X's written approval).
 
 Env (names only, values never in the repo): JMI_DB, JMI_BOT_WALLET, JMI_FEE_ADDRESS,
 JMI_X_BOT_USER_ID, JMI_X_USER_TOKEN, JMI_RPC_URLS, JMI_DAS_URL, JMI_PINATA_JWT,
-JMI_GEMINI_KEY, JMI_GEMINI_MODEL, JMI_VAULT_URL, JMI_VAULT_TOKEN"""
+JMI_GEMINI_KEY, JMI_GEMINI_MODEL, JMI_VAULT_URL, JMI_VAULT_TOKEN,
+IMAGE_EDITOR (stub|gemini, default stub), GEMINI_API_KEY (gemini only), JMI_MOGME_QUEUE,
+JMI_MOGME_REFS (style references, default mogme_refs)"""
 import os
 import sys
 import time
@@ -20,6 +29,7 @@ import traceback
 from decimal import Decimal
 
 from . import fees
+from . import parse as P
 from .adapters import Adapters
 from .engine import Engine, Refused
 from .policy import load
@@ -63,10 +73,18 @@ class _Pair:
     def probe(self, quote):
         return {"launchable": quote == "SOL", "expires_at": time.time() + 60}
 
+def mogme_flow(store, p, x):
+    """The "mog me" approval queue. IMAGE_EDITOR picks the editor (default stub); gemini without
+    GEMINI_API_KEY raises MogMeConfigError, which refuses boot."""
+    from .mogme_pose import build_pose_reader
+    from .mogme_queue import MogMeFlow, build_editor
+    return MogMeFlow(store, p, x, build_editor(), os.environ.get("JMI_MOGME_QUEUE", "mogme_queue"),
+                     pose_reader=build_pose_reader())
+
 def loop(dry_run):
     store = Store(os.environ.get("JMI_DB", "justmogit.db"))
     p, a, wallet, rpc = build(dry_run, store)
-    e = Engine(store, p, a, public=not dry_run)
+    e = Engine(store, p, a, public=not dry_run, mogme=mogme_flow(store, p, a.x))
     print("boot:", e.boot())
     last_sweep = 0
     while True:
@@ -92,6 +110,56 @@ def loop(dry_run):
             traceback.print_exc()
         time.sleep(60)                                        # mention-poll fallback cadence (§10)
 
+def mogme_cmd(cmd, args):
+    from .live.x import XClient
+    from .mogme_queue import MogMeError
+    store = Store(os.environ.get("JMI_DB", "justmogit.db"))
+    p = load()
+    x = XClient()
+    try:
+        flow = mogme_flow(store, p, x)
+    except MogMeError as err:
+        print("refused at boot:", err); return 2
+    if cmd == "mogme-preview":                 # read-only on X: mentions in, previews to disk
+        ms, newest = x.mentions(store.get("mogme_preview_since_id"))
+        for m in ms:
+            if P.parse(m.get("text", ""), m.get("quoted_tweet_id")).kind == "mog_me":
+                print(m["id"], flow.handle(m))
+        if newest:
+            store.put("mogme_preview_since_id", newest)
+        return 0
+    if cmd == "mogme-list":
+        hits = sum(1 for r in store.ledger("mogme_budget_hit") if r["ts"] >= time.time() - 86_400)
+        try:
+            spend = f"${flow.spent()}"
+        except MogMeError:
+            spend = "CORRUPT (mog-me refuses all spending until fixed)"
+        print(f"mog-me spend today {spend} of ${p.raw['mog_me']['daily_budget_usd']} "
+              f"(ceiling ${p.raw['mog_me']['daily_budget_max_usd']}); budget hits last 24h: {hits}")
+        from collections import Counter
+        tally = Counter(f"{k}={v}" for it in flow.items() for k, v in (it.get("traits") or {}).items()
+                        if k in ("frame_text", "caption"))
+        print("traits so far:", dict(sorted(tally.items())) or "none")
+        for it in flow.items(args[0] if args else None):
+            tr = it.get("traits") or {}
+            print(it["mention_id"], it["status"], it["handle"], it["image_path"], it["reply_text"],
+                  f"frame_text={tr.get('frame_text')} caption={tr.get('caption')} palette={tr.get('palette')}")
+        return 0
+    try:
+        if cmd == "mogme-approve":
+            print(flow.approve(args[0], args[1], " ".join(args[2:]))["status"]); return 0
+        if cmd == "mogme-reject":
+            print(flow.reject(args[0], args[1], " ".join(args[2:]))["status"]); return 0
+        if cmd == "mogme-ref":
+            print(flow.add_ref(args[0], os.environ.get("JMI_MOGME_REFS", "mogme_refs"))); return 0
+    except (IndexError, MogMeError) as err:
+        print("refused:", err); return 2
+    if cmd == "mogme-post":
+        if flow.killed():
+            print("kill switch is ON: nothing posted"); return 0
+        print(flow.post_ready()); return 0
+    print(__doc__); return 2
+
 def main(argv):
     if not argv:
         print(__doc__); return 2
@@ -100,6 +168,8 @@ def main(argv):
         return loop("--dry-run" in args)
     store = Store(os.environ.get("JMI_DB", "justmogit.db"))
     p = load()
+    if cmd.startswith("mogme-"):
+        return mogme_cmd(cmd, args)
     if cmd == "status":
         e = Engine(store, p, Adapters())
         print({"kill": e.killed(), "bankroll_sol": str(Decimal(store.get("bankroll_available", 0)) / 10**9),

@@ -26,7 +26,8 @@ class M:
         self.tx = tx
         self.simr = sim if sim is not None else {"payer_lamports_delta": -20591640}
         self.ok = ok
-        self.q = {"sol": sol, "usd": usd, "mint": mint or "EarneMetyCsEqac2EEiLUh3VdR6bMre6cqM9rftNc6jB"}
+        self.q = {"sol": sol, "usd": usd, "mint": mint or "EarneMetyCsEqac2EEiLUh3VdR6bMre6cqM9rftNc6jB",
+                  "quote_mint": "So11111111111111111111111111111111111111112", "first_buy_lamports": 0}
         self.sent = []
         self.submit_fn = submit_fn
     def quote(self): return dict(self.q)
@@ -60,7 +61,7 @@ class Img:
 def make_ledger(spent="15.91", cap="30"):
     d = tempfile.mkdtemp()
     p = os.path.join(d, "ledger.json")
-    Path(p).write_text(json.dumps({"cap_usd": cap, "spent_usd": spent}))
+    Path(p).write_text(json.dumps({"cap_usd": cap, "spent_usd": spent, "kill": False}))
     return Ledger(p), p
 
 def run(sess, *msgs):
@@ -169,7 +170,7 @@ class Fixes(unittest.TestCase):
     # --- FIX 2: simulated spend checked against the quote; actual cost committed ---
     def test_sim_spend_over_quote_refused(self):
         L, _ = make_ledger()
-        m = M(sim={"payer_lamports_delta": -30_000_000})  # quote is 20,591,640 lamports
+        m = M(sim={"payer_lamports_delta": -22_000_000})  # quote is 20,591,640 lamports; under the 0.025 SOL cap so FIX 2 is what refuses
         sess = Session("grok-bot", L, m, Chain(), Vault(), Img())
         out = run(sess, *HAPPY)
         self.assertIn("REFUSED", out)
@@ -293,7 +294,7 @@ class Fixes(unittest.TestCase):
         class BrokenSettle(Ledger):
             def settle(self, rid, record): raise LedgerError("disk on fire")
         d = tempfile.mkdtemp(); p = os.path.join(d, "ledger.json")
-        Path(p).write_text(json.dumps({"cap_usd": "30", "spent_usd": "15.91"}))
+        Path(p).write_text(json.dumps({"cap_usd": "30", "spent_usd": "15.91", "kill": False}))
         L = BrokenSettle(p)
         m = M()
         sess = Session("grok-bot", L, m, Chain(), Vault(), Img())

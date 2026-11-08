@@ -113,11 +113,33 @@ def validate_decision(raw, pair, registry, context):
 
 
 class PairPreview:
-    def __init__(self, resolver, registry, context, evaluator):
+    """Timeout ruling 2026-11-07: warm up once at boot, then retry the evaluator exactly
+    once on a timeout. A second timeout is a skip (reject, kind "timeout"), never a launch."""
+
+    def __init__(self, resolver, registry, context, evaluator, warm_up=None):
         self.resolver = resolver
         self.registry = registry
         self.context = context
         self.evaluator = evaluator
+        self._warm_up = warm_up
+
+    def warm_up(self):
+        """Run the boot warm-up hook once. Returns True/False, or None with no hook.
+        A failed warm-up never blocks boot; the single timeout retry still applies."""
+        if self._warm_up is None:
+            return None
+        try:
+            return bool(self._warm_up())
+        except Exception:
+            return False
+
+    def _evaluate(self, pair, context):
+        try:
+            return self.evaluator(pair, context)
+        except PairEvaluatorError as exc:
+            if exc.kind != "timeout":
+                raise
+        return self.evaluator(pair, context)  # exactly one retry; a second timeout propagates
 
     def review(self, base_mint):
         try:
@@ -145,7 +167,7 @@ class PairPreview:
                 tuple(c for c in context.candidates if c.mint in allowed),
                 context.liquidity, context.floor_usd,
             )
-            raw = self.evaluator(pair, context)
+            raw = self._evaluate(pair, context)
             return validate_decision(raw, pair, registry, context), context
         except PairEvaluatorError as exc:
             return ReviewResult("reject", "pair_review_failed", kind=exc.kind), None

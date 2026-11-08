@@ -14,7 +14,7 @@ def _no_net(*a, **k): raise AssertionError("network used in tests")
 class M:
     def __init__(s, tx=TREMP, sim=None, ok=True, sol="0.02059164", usd="1.93"):
         s.tx, s.simr, s.ok, s.q, s.sent = tx, sim or {"payer_lamports_delta": -20591640}, ok, {"sol": sol, "usd": usd,
-            "mint": "EarneMetyCsEqac2EEiLUh3VdR6bMre6cqM9rftNc6jB"}, []
+            "mint": "EarneMetyCsEqac2EEiLUh3VdR6bMre6cqM9rftNc6jB", "quote_mint": "So11111111111111111111111111111111111111112", "first_buy_lamports": 0}, []
     def quote(s): return s.q
     def build(s, c, q): return s.tx
     def simulate(s, tx): s.simulated = True; return s.simr
@@ -29,7 +29,7 @@ class Img:
 
 def ledger(spent="15.91"):
     d = tempfile.mkdtemp(); p = os.path.join(d, "ledger.json")
-    Path(p).write_text(json.dumps({"cap_usd": "30", "spent_usd": spent})); return Ledger(p)
+    Path(p).write_text(json.dumps({"cap_usd": "30", "spent_usd": spent, "kill": False})); return Ledger(p)
 
 def run(sess, *msgs):
     out = None

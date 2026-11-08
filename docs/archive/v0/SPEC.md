@@ -1,3 +1,5 @@
+> **SUPERSEDED (2026-11-07).** v0 document, archived unchanged below this header. Current: [BUILD-SPEC-v2.md](../../../BUILD-SPEC-v2.md) and [BOT.md](../../../BOT.md); front door: [README.md](../../../README.md).
+
 # MogIt — Refined Product Spec
 
 - **Source draft:** Sneaks, 2026-11-01 ("Just mog it. Create a token for it. Then make a GitHub. Then a website with hooks. It will be an agent skill so when you type /mogit — coin is launched or whatever prompt pops up. Rough draft needs work.")
