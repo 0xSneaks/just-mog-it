@@ -64,3 +64,13 @@ Mogz create adapter: CANCELLED (owner ruling 2026-11-07, mogz is out). No venue 
 | `bot/run.py` | `mogme-list` | Prints "CORRUPT" instead of crashing. |
 
 Regressions in `tests/test_mogme_queue.py` cover `_room`, `_book`, intake and `post_ready`, with negative, NaN, sNaN, ±inf, malformed, bool, None, float, zero, exact-budget and one-unit-over cases, plus Codex's exact repro. Mutation-checked. Suite: **575 passed** (clean venv too).
+
+## Pass 7: Codex CHANGES @ aa20648 (rounding + overflow)
+
+| File | Lines | Change |
+|---|---|---|
+| `bot/mogme_queue.py` | `MAX_USD_AMOUNT`, `USD_PLACES`, `_amount` | Amounts must be ≤ $1,000,000 with at most 9 decimal places (trailing zeros ignored), so every sum is exact in the default 28-digit context. Older stored rows (0.039, 4.95, "5.00", 3) still read. |
+| `bot/mogme_queue.py` | `_exact_sum`, `_room`, `_book` | Addition runs with Inexact/Rounded trapped. Any rounding or arithmetic error makes `_room` return False and `_book` raise with no write. Codex's P1 (stored 4.985…0001 + 0.015 rounding to exactly $5) and P2 (1e1000000 Overflow) are both refused with no dispatch and no change to the stored value. |
+| `tests/test_retired_disclaimer.py` | EOF | Trailing blank line removed (`git diff --check` clean). |
+
+Suite: **586 passed**. New guards mutation-checked.

@@ -51,4 +51,3 @@ def test_callout_copy():
 def test_launch_packs_and_metadata_fixtures():
     for path in list((ROOT / "packs").glob("*.json")):
         _clean(json.dumps(json.loads(path.read_text())))
-

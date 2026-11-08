@@ -932,3 +932,55 @@ def test_float_amounts_refused_no_float_noise(bad):
     store.put(f"mogme_spend:{f.day()}", bad)
     with pytest.raises(mq.MogMeError):
         f.spent()
+
+
+# ================================================================== Codex re-review CHANGES @ aa20648
+def test_codex_rounding_repro_refused_no_dispatch_no_mutation():
+    from fractions import Fraction
+    x = X(); f, s = flow(x=x, kill=False)
+    key = "mogme_spend:" + f.day()
+    stored = "4.98500000000000000000000000001"                 # exact sum with 0.015 is just over $5
+    s.put(key, stored)
+    assert Fraction(stored) + Fraction("0.015") > 5
+    f._save("123", "111", "user", None, "fixture"); f.approve("123", "Sneaks", "fixture")
+    assert f._room(Decimal("0.015")) is False
+    assert f.post_ready() == [] and x.replies == []
+    assert s.get(key) == stored
+
+
+@pytest.mark.parametrize("stored", ["1e1000000", "9" * 40, "1e-1000000", "0." + "0" * 40 + "1", "1E+7"])
+def test_extreme_finite_amounts_refused_not_crashing(stored):
+    x = X(); f, s = flow(x=x, kill=False)
+    key = "mogme_spend:" + f.day()
+    s.put(key, stored)
+    f._save("123", "111", "user", None, "fixture"); f.approve("123", "sneaks", "fixture")
+    assert f._room(Decimal("0.015")) is False
+    with pytest.raises(mq.MogMeError):
+        f._book(Decimal("0.015"))
+    assert f.post_ready() == [] and x.replies == []
+    assert s.get(key) == stored
+
+
+@pytest.mark.parametrize("cost", [Decimal("1e1000000"), Decimal("1e-50"), Decimal("0.0000000001")])
+def test_extreme_costs_refused(cost):
+    f, s = flow()
+    assert f._room(cost) is False
+    with pytest.raises(mq.MogMeError):
+        f._book(cost)
+    assert s.get(f"mogme_spend:{f.day()}") is None
+
+
+def test_exact_budget_and_one_smallest_unit_over_at_full_precision():
+    f, s = flow()                                                   # $5.00 budget, 9-decimal precision
+    s.put("mogme_spend:" + f.day(), "4.985000000")
+    assert f._room(Decimal("0.015")) is True                        # lands exactly on $5
+    assert f._room(Decimal("0.015000001")) is False                 # one smallest unit over
+    f._book(Decimal("0.015"))
+    assert f.spent() == Decimal("5") and f._room(Decimal("0.000000001")) is False
+
+
+def test_legacy_valid_rows_still_read():
+    f, s = flow()
+    for legacy in ("0", "0.039", "0.117", "4.95", "5.00", 3):
+        s.put("mogme_spend:" + f.day(), legacy)
+        assert f.spent() == Decimal(str(legacy))

@@ -22,7 +22,7 @@ import os
 import re
 import time
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, Inexact, InvalidOperation, Rounded, localcontext
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -36,6 +36,8 @@ FETCH_TIMEOUT_S = 10
 MAX_AVATAR_BYTES = 5 * 1024 * 1024
 AVATAR_MIME = ("image/jpeg", "image/png", "image/webp")
 COOLDOWN_S = 24 * 3600
+MAX_USD_AMOUNT = Decimal("1000000")   # any mog-me cost or stored daily spend above this is corrupt
+USD_PLACES = 9                         # amounts carry at most 9 decimal places
 EDIT_TIMEOUT_S = 60
 MIN_SIDE = 512                      # avatars smaller than this are upscaled before the edit
 UPSCALE_SIDE = 1024
@@ -534,9 +536,21 @@ class MogMeFlow:
         if isinstance(value, bool) or not isinstance(value, (str, int, Decimal)):
             raise MogMeError(f"{name} is not a valid amount")
         try:
-            return _usd(value, name)
+            d = _usd(value, name)
         except MogMeConfigError:
             raise MogMeError(f"{name} is not a valid amount") from None
+        # Bounded so every sum below is exact in the default 28-digit context: at most
+        # $1,000,000 and at most 9 decimal places (trailing zeros don't count).
+        if d > MAX_USD_AMOUNT or (d != 0 and d.normalize().as_tuple().exponent < -USD_PLACES):
+            raise MogMeError(f"{name} is out of range")
+        return d
+
+    @staticmethod
+    def _exact_sum(a, b):
+        """a + b with rounding forbidden: any inexact result raises (caller refuses)."""
+        with localcontext() as ctx:
+            ctx.traps[Inexact] = ctx.traps[Rounded] = True
+            return a + b
 
     def spent(self, day=None):
         """Today's mog-me spend. A corrupt stored value raises (fail closed), never reads as 0."""
@@ -546,17 +560,21 @@ class MogMeFlow:
         """Validate the cost AND the stored spend before writing; on any error nothing changes."""
         k = f"mogme_spend:{day or self.day()}"
         cost, current = self._amount(usd, "mog-me cost"), self.spent(day)
-        self.s.put(k, str(current + cost))
+        try:
+            total = self._exact_sum(current, cost)
+        except ArithmeticError:
+            raise MogMeError("mog-me spend would not be exact") from None
+        self.s.put(k, str(total))
 
     def _room(self, usd, day=None):
         """True only when the cost and the stored spend are valid and fit the budget. Invalid
         state refuses (False) with no mutation, so callers make no Gemini or X call."""
         try:
             cost, current = self._amount(usd, "mog-me cost"), self.spent(day)
-        except MogMeError:
+            return self._exact_sum(current, cost) <= mogme_budget(self.p)
+        except (MogMeError, ArithmeticError):
             self.s.ledger_row("mogme_budget_invalid", {"day": day or self.day()})
             return False
-        return current + cost <= mogme_budget(self.p)
 
     def day(self):
         return datetime.fromtimestamp(self.clock(), timezone.utc).strftime("%Y-%m-%d")
