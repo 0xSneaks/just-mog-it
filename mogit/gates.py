@@ -49,11 +49,19 @@ def check_quote(q):
         sol = Decimal(str(q["sol"]))
     except (KeyError, TypeError, ValueError, InvalidOperation):
         raise GateError("quote SOL amount is invalid") from None
-    lamports = sol * Decimal(1_000_000_000)
-    if not sol.is_finite() or sol < 0 or lamports != lamports.to_integral_value():
+    if not sol.is_finite() or sol < 0:
         raise GateError("quote SOL amount must be non-negative whole lamports")
-    if lamports > PER_LAUNCH_CAP_LAMPORTS:
+    # Compare the original decimal before any context-sensitive arithmetic.
+    if sol > Decimal("0.025"):
         raise GateError(f"quote {sol} SOL exceeds the 0.025 SOL per-launch cap")
+    if sol.is_zero():
+        return 0
+    sign, digits, exponent = sol.as_tuple()
+    # Tuple construction shifts the exponent exactly, independent of precision,
+    # rounding mode, and the context's exponent limits (unlike multiplication).
+    lamports = Decimal((sign, digits, exponent + 9))
+    if lamports != lamports.to_integral_value():
+        raise GateError("quote SOL amount must be non-negative whole lamports")
     return int(lamports)
 
 
@@ -80,7 +88,9 @@ def payer_spend(delta):
         raise GateError("simulation delta must be a whole number of lamports")
     if value > 0:
         raise GateError("simulation delta positive: payer would gain lamports")
-    return check_spend(-value)
+    if value < -PER_LAUNCH_CAP_LAMPORTS:
+        raise GateError("simulated spend exceeds the 0.025 SOL per-launch cap")
+    return check_spend(value.copy_negate())
 
 
 def check_preflight(ledger, state, q, now):

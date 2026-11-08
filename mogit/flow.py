@@ -4,7 +4,7 @@ vault (sign), images (verify). Gate 2: every tx is simulated and its cost shown 
 import base64, hashlib, json, re, time
 from decimal import Decimal
 from .guard import inspect, GuardError, b58, _cu16
-from .ledger import LedgerError
+from .ledger import LedgerError, validate_usd
 from . import gates
 
 BANNED = {"trump", "elon", "musk", "biden", "nike", "disney"}  # supplemental; real-person/brand needs Sneaks yes
@@ -41,6 +41,7 @@ class Session:
     def _preflight(self):
         q = self.mogz.quote()
         gates.check_quote(q)  # validate the SOL amount before parsing or comparing it
+        validate_usd(q.get("usd"))  # refuse missing/invalid USD before build or sign
         bal = Decimal(str(self.chain.balance_sol()))
         if bal < Decimal(str(q["sol"])): raise LedgerError(f"wallet underfunded: need {q['sol']}, have {bal}")
         st = self.ledger.check(q["usd"])

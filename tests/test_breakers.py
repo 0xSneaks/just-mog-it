@@ -149,11 +149,12 @@ class Breakers(unittest.TestCase):
         L, _ = make_ledger(spent="28.07")
         with self.assertRaises(LedgerError):
             L.check("1.94")
-    def test_negative_spent_still_loads(self):
-        # document behavior: negative spent enlarges remaining — potential hole if ledger is writable by attacker
+    def test_negative_spent_refuses(self):
+        # Corrupt recorded spend must never enlarge the lifetime budget.
         L, _ = make_ledger(spent="-5")
-        st = L.load()
-        self.assertEqual(st["remaining_usd"], Decimal("35"))
+        with self.assertRaises(LedgerError):
+            L.load()
+        self.assertTrue(L.kill_on())
 
     # --- gate 3: pin every account + shape ---
     def test_each_pinned_account_tamper_refused(self):
