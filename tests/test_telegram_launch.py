@@ -34,7 +34,7 @@ PAYLOAD = {
     "name": "Test",
     "ticker": "TEST",
     "venue": "pumpfun",
-    "image_url": "https://example.com/jose.png",
+    "image_url": "https://example.com/test.png",
     "original": {"name": "Test Original", "ticker": "TESTOG"},
     "channel": "test",
 }
