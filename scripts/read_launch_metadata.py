@@ -22,7 +22,7 @@ from bot.live.solana import find_pda  # noqa: E402
 from mogit.guard import b58  # noqa: E402
 
 METADATA_PROGRAM = "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
-LAUNCH_001 = "3cHj1iCgZb18Q8ZrqbsAtwNGjn6gifQRqnCedHhdmogz"
+LAUNCH_001 = "2bhR4BoUVAPnKi46VYt6UcRUrVtT1UYtwsb4QUpx7tnK"  # synthetic placeholder mint (offline fixture only)
 _CID = re.compile(r"/ipfs/(Qm[1-9A-HJ-NP-Za-km-z]{44}|b[a-z2-7]{20,})")
 
 

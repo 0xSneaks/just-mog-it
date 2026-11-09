@@ -13,8 +13,8 @@ from bot.policy import load
 
 ROOT = Path(__file__).resolve().parents[1]
 RETIRED = re.compile(r"not the original dev|(?<![A-Za-z0-9])nfa(?![A-Za-z0-9])", re.I)
-CA = "5NRzuqfyd4r7dHHKDpMY9HdGM2BMgSQhcZAbXTcfLoat"
-NEW = "3cHj1iCgZb18Q8ZrqbsAtwNGjn6gifQRqnCedHhdmogz"
+CA = "AcUM827zs6AqnEuLo9qQ1e2wKuKav1uxw6t4Z4Uraamr"
+NEW = "2bhR4BoUVAPnKi46VYt6UcRUrVtT1UYtwsb4QUpx7tnK"
 
 
 def _clean(text):
@@ -30,12 +30,12 @@ def test_policy_yaml_templates():
 def test_description_template_and_built_metadata():
     p = load()
     _clean(p.description_prefix)
-    _clean(metadata.build_description(p, "JOSE", CA, "gm. Not the original dev. NFA. nfa"))
+    _clean(metadata.build_description(p, "TEST", CA, "gm. Not the original dev. NFA. nfa"))
 
 
 def test_every_reply_template():
     for venue in replies.VENUE_WORD:
-        _clean(replies.launched(SimpleNamespace(ticker="JOSE"), NEW, venue))
+        _clean(replies.launched(SimpleNamespace(ticker="TEST"), NEW, venue))
     _clean(replies.payment_request("job1", NEW, "0.02"))
     _clean(replies.wallet_request())
     for code, template in replies.REJECT.items():
@@ -45,7 +45,7 @@ def test_every_reply_template():
 
 
 def test_callout_copy():
-    _clean(callout.story_text("JOSE", "MUSK4", NEW))
+    _clean(callout.story_text("TEST", "MUSK4", NEW))
 
 
 def test_launch_packs_and_metadata_fixtures():

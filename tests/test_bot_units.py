@@ -170,7 +170,7 @@ class TestReplies(unittest.TestCase):
         self.assertIn(CA, t); self.assertNotIn("pump.fun", t); self.assertNotIn("http", t)
 
     def test_launch_reply_venue_from_record(self):
-        d = type("D", (), {"ticker": "JOSE"})
+        d = type("D", (), {"ticker": "TEST"})
         self.assertIn("on pumpfun.", replies.launched(d, CA, "pump.fun"))
         m = replies.launched(d, CA, "mogz.fun")
         self.assertIn("on mogz.", m); self.assertNotIn("pumpfun", m); self.assertNotIn("mogz.fun", m)

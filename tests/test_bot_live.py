@@ -212,12 +212,12 @@ class TestLaunchMetadataReader(unittest.TestCase):
         s = lambda t, pad=0: len(t.encode() + b"\0" * pad).to_bytes(4, "little") + t.encode() + b"\0" * pad
         ua, mint = bytes([7]) * 32, bytes([9]) * 32
         uri = "https://gateway.pinata.cloud/ipfs/QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG"
-        data = (b"\x04" + ua + mint + s("Jose", 4) + s("JOSE") + s(uri) + (0).to_bytes(2, "little")
+        data = (b"\x04" + ua + mint + s("Test", 4) + s("TEST") + s(uri) + (0).to_bytes(2, "little")
                 + b"\x01" + (1).to_bytes(4, "little") + bytes(32) + b"\x01\x64" + b"\x00" + b"\x01" + b"\xff" * 8)
         d = m.decode_metadata(data)
-        self.assertEqual((d["name"], d["symbol"], d["uri"], d["isMutable"]), ("Jose", "JOSE", uri, True))
+        self.assertEqual((d["name"], d["symbol"], d["uri"], d["isMutable"]), ("Test", "TEST", uri, True))
         self.assertEqual(d["updateAuthority"], b58(ua))
         self.assertTrue(m.uri_storage(uri).startswith("content-addressed"))
         self.assertTrue(m.uri_storage("ar://abc").startswith("content-addressed"))
         self.assertTrue(m.uri_storage("https://mogz.fun/meta/x.json").startswith("mutable host"))
-        self.assertTrue(m.metadata_pda("3cHj1iCgZb18Q8ZrqbsAtwNGjn6gifQRqnCedHhdmogz"))
+        self.assertTrue(m.metadata_pda("2bhR4BoUVAPnKi46VYt6UcRUrVtT1UYtwsb4QUpx7tnK"))

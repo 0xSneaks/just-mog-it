@@ -7,7 +7,7 @@ from bot import callout
 from bot.callout import (APPROVED, AWAITING_APPROVAL, CONFIRMED, FAILED, POSTED, REFUSED,
                          CalloutError, CalloutFlow, launch_done)
 
-MINT = "3cHj1iCgZb18Q8ZrqbsAtwNGjn6gifQRqnCedHhdmogz"
+MINT = "2bhR4BoUVAPnKi46VYt6UcRUrVtT1UYtwsb4QUpx7tnK"
 WALLET = "2LYQUArYnaYR2YTePK99mUiYU5mFXn1qZqe5b3xGsvHt"
 OTHER = "So11111111111111111111111111111111111111112"
 
@@ -39,14 +39,14 @@ def http_ok(confirm=True):
 
 
 def approved(flow):
-    item = flow.prepare(mint=MINT, ticker="JOSE", old_quote="MUSK4",
+    item = flow.prepare(mint=MINT, ticker="TEST", old_quote="MUSK4",
                         image="https://ipfs.io/ipfs/x", link=f"https://mogz.fun/coin/{MINT}")
     return flow.approve(item, "sneaks")
 
 
 def test_default_stops_at_awaiting_approval_without_network():
     http, rpc = Mock(), Mock()
-    item = CalloutFlow(WALLET, http=http, rpc=rpc).prepare(mint=MINT, ticker="JOSE", old_quote="MUSK4")
+    item = CalloutFlow(WALLET, http=http, rpc=rpc).prepare(mint=MINT, ticker="TEST", old_quote="MUSK4")
     assert item["state"] == AWAITING_APPROVAL
     http.assert_not_called(); rpc.assert_not_called()
     assert not launch_done(item)
@@ -54,7 +54,7 @@ def test_default_stops_at_awaiting_approval_without_network():
 
 def test_post_without_approval_refused():
     flow = CalloutFlow(WALLET, http=Mock(), rpc=Mock())
-    item = flow.prepare(mint=MINT, ticker="JOSE", old_quote="MUSK4")
+    item = flow.prepare(mint=MINT, ticker="TEST", old_quote="MUSK4")
     with pytest.raises(CalloutError):
         flow.post(item)
     with pytest.raises(CalloutError):
@@ -112,8 +112,8 @@ def test_defaults_are_unwired():
 
 
 def test_story_copy_and_sanitizing():
-    text = callout.story_text("JO‮SE\x00<script>", "MUSK4\n", MINT)
-    assert text == f"$JOSEscript was stuck on a MUSK4 pair. JustMogIt relaunched it on a SOL pair. New CA: {MINT}"
+    text = callout.story_text("TE‮ST\x00<script>", "MUSK4\n", MINT)
+    assert text == f"$TESTscript was stuck on a MUSK4 pair. JustMogIt relaunched it on a SOL pair. New CA: {MINT}"
     assert len(text) <= 280
 
 
@@ -121,11 +121,11 @@ def test_story_copy_and_sanitizing():
 def test_non_https_image_or_link_refused(bad):
     flow = CalloutFlow(WALLET)
     with pytest.raises(CalloutError):
-        flow.prepare(mint=MINT, ticker="JOSE", old_quote="MUSK4", image=bad)
+        flow.prepare(mint=MINT, ticker="TEST", old_quote="MUSK4", image=bad)
     with pytest.raises(CalloutError):
-        flow.prepare(mint=MINT, ticker="JOSE", old_quote="MUSK4", link=bad)
+        flow.prepare(mint=MINT, ticker="TEST", old_quote="MUSK4", link=bad)
 
 
 def test_invalid_mint_refused():
     with pytest.raises(CalloutError):
-        CalloutFlow(WALLET).prepare(mint="not a mint", ticker="JOSE", old_quote="MUSK4")
+        CalloutFlow(WALLET).prepare(mint="not a mint", ticker="TEST", old_quote="MUSK4")

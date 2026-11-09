@@ -17,7 +17,7 @@ SPEC = importlib.util.spec_from_file_location(
 tl = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(tl)
 
-MINT = "3cHj1iCgZb18Q8ZrqbsAtwNGjn6gifQRqnCedHhdmogz"
+MINT = "2bhR4BoUVAPnKi46VYt6UcRUrVtT1UYtwsb4QUpx7tnK"
 SECRET = "test-secret-value"
 
 ENV = {
@@ -31,11 +31,11 @@ ENV = {
 
 PAYLOAD = {
     "mint": MINT,
-    "name": "Jose",
-    "ticker": "JOSE",
+    "name": "Test",
+    "ticker": "TEST",
     "venue": "pumpfun",
     "image_url": "https://example.com/jose.png",
-    "original": {"name": "Jose Original", "ticker": "JOSEOG"},
+    "original": {"name": "Test Original", "ticker": "TESTOG"},
     "channel": "test",
 }
 
@@ -156,7 +156,7 @@ def test_happy_path_posts_facts_only_to_test_channel(monkeypatch):
     sent = calls[0]["payload"]
     assert sent["chat_id"] == ENV["TELEGRAM_TEST_CHANNEL_ID"]
     caption = sent["caption"]
-    for needle in ("Jose", "$JOSE", MINT, "pump.fun", "Jose Original", "$JOSEOG"):
+    for needle in ("Test", "$TEST", MINT, "pump.fun", "Test Original", "$TESTOG"):
         assert needle in caption
     for banned in ("100x", "buy now", "guaranteed", "moon", "profit"):
         assert banned not in caption.lower()

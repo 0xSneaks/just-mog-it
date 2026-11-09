@@ -31,9 +31,7 @@ Fixed money rules, enforced in code: SOL pairs only · dev buy 0 · per-launch c
 
 ## Launch record
 
-| # | CA | Create tx | Venue | Dev buy | Note |
-|---|---|---|---|---|---|
-| 001 | `3cHj1iCgZb18Q8ZrqbsAtwNGjn6gifQRqnCedHhdmogz` | `5BBJ1MNdrgVJ89PsrRTNJqTvNUTonXdhJ59embQjgDsMNPVmCkRR217tkKj4oM4YWCsHHS1Z4S24gLoSzGPLRLQp` | mogz.fun | 0 | Launched manually via external executor, not the bot. |
+Launch records are kept out of this repo by owner order (2026-11-09).
 
 ## Tests
 
